@@ -1,0 +1,4 @@
+# ignore all matlab data files
+*.mat
+# ignore all matlab asv files
+*.asv
