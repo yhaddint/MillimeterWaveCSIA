@@ -1,23 +1,38 @@
-function [ peak_pow_H1, peak_pow_H0 ] = run_PSS_detection( SNR_dB, STO )
+function [ peak_pow_H1, peak_pow_H0 ] = run_PSS_detection( SNR_range, STOtype, STOinfo, BFtype, M_burst )
 %RUN_PSS_DETECTION Summary of this function goes here
 %   Detailed explanation goes here
-    
-    % control parameters ---------
-    if STO==0
-        perfectSTO=1;
-    else
-        perfectSTO=0;
-    end
+
+    % ------ SNR parameters ---------
+    SNR_num = length(SNR_range);
+
+    % ---- Results vector dimension initialization -----
+    peak_pow_H1 = zeros(SNR_num,1);
+    peak_pow_H0 = zeros(SNR_num,1);
     
     % ----- system parameters --------
-    M = 20; % Number of ZC burst
-    noise_pow = 10^(-SNR_dB/10);
-    ZC_root = 29; % ZC root, a prime value with ZC length
+    Nt = 32; % Number of antenna in tx
+    Nr = 8; % Number of antenna in Rx
+    switch BFtype
+        case 'directional'
+            M = Nt*Nr;
+        case 'PN'
+            M = M_burst(1);
+        case 'sector'
+            M = M_burst(1)*M_burst(2);
+    end
+    ZC_root = 29; % ZC root, a coprime number with ZC length
     ZC_N = 255; % ZC sequence length
     burst_N = ZC_N*2; % number of sample in each burst (2OFDM symbol for now)
     Rx_sig_length = burst_N * M + ZC_N - 1; % signal length after ZC correlation;
-    Nt = 32; % Number of antenna in tx
-    Nr = 16; % Number of antenna in Rx
+
+
+    % ----- STO ------
+    switch STOtype
+        case 'zero'
+            STO = 0;
+        case 'random'
+            STO = randi(Rx_sig_length);
+    end
 
     % ------ channel parameter ------
     print_stat = 0;
@@ -39,7 +54,6 @@ function [ peak_pow_H1, peak_pow_H0 ] = run_PSS_detection( SNR_dB, STO )
     ZC_t_domain = conj(flipud(seq_1DC));  % ZC sequence used for correlation in Rx
 
 
-
     % ------- Random parameter realizations -----   
     [ raygain,...
       raydelay,...
@@ -52,8 +66,18 @@ function [ peak_pow_H1, peak_pow_H0 ] = run_PSS_detection( SNR_dB, STO )
                                           sigma_AOA_spread,...
                                           centroid_AOD,...
                                           sigma_AOD_spread); % Channel parameters generation
-    W_mat = get_IA_BF(Nr, M,'PN');% Rx beamformer in IA stage
-    V_mat = get_IA_BF(Nt, M,'PN'); % Tx beamformer in IA stage
+    switch BFtype
+        case 'PN'
+            V_mat = get_IA_BF(Nt, M, BFtype); % Tx beamformer in IA stage
+            W_mat = get_IA_BF(Nr, M, BFtype); % Rx beamformer in IA stage
+        case 'directional'
+            V_mat = get_IA_BF(Nt, Nt, BFtype); % Tx beamformer in IA stage
+            W_mat = get_IA_BF(Nr, Nr, BFtype); % Rx beamformer in IA stage
+        case 'sector'
+            V_mat = get_IA_BF(Nt, M_burst(1), BFtype); % Tx beamformer in IA stage
+            W_mat = get_IA_BF(Nr, M_burst(2), BFtype); % Rx beamformer in IA stage
+            
+    end % end of switch
     
     % ----- Initializations of vec, mat -----
     Rx_sig = zeros(Tx_sig_length, 1); % received signal in t domain
@@ -74,35 +98,72 @@ function [ peak_pow_H1, peak_pow_H0 ] = run_PSS_detection( SNR_dB, STO )
     precoder_index_old = 0;
     combiner_index_old = 0;
     for nn=1:Tx_sig_length
-        precoder_index = floor( (nn-1) / burst_length )+1;
-        combiner_index = floor( (nn + STO - 1) / burst_length )+1;
+        switch BFtype 
+            case 'PN' % w/ PN BF, BF changes every burst_length samples 
+            precoder_index = floor( (nn-1) / burst_length )+1;
+            combiner_index_raw = floor( (nn + STO - 1) / burst_length )+1;
+            combiner_index = mod(combiner_index_raw-1,M)+1;
+            
+            case 'directional' % w/ directional beam (steering vector) 
+            precoder_index = floor( (nn-1) / (burst_length*Nr) )+1;
+            combiner_index_raw = floor( (nn + STO - 1) / burst_length )+1;
+            combiner_index = mod(combiner_index_raw-1,Nr)+1;
+            
+            case 'sector' % w/ sector beam 
+            precoder_index = floor( (nn-1) / (burst_length*M_burst(2)) )+1;
+            combiner_index_raw = floor( (nn + STO - 1) / burst_length )+1;
+            combiner_index = mod(combiner_index_raw-1,M_burst(2))+1;
+        end
         if (precoder_index ~= precoder_index_old) || (combiner_index ~= combiner_index_old)
+%             fprintf('precoder index %d, ',precoder_index);
+%             fprintf('combiner index %d\n',combiner_index); 
             w_vec = W_mat(:,combiner_index);
             v_vec = V_mat(:,precoder_index);
             g_effective = (w_vec'*H_chan*v_vec);
             precoder_index_old = precoder_index;
             combiner_index_old = combiner_index;
         end
+%         index_debug(:,nn) = [precoder_index;combiner_index];
+%         g_save_debug(nn) = g_effective;
         Rx_sig(nn) = g_effective * Tx_sig(nn);
-    end
+    end % end of sample sweeping
     
     % ------- AWGN -------
-    noise = (randn(Tx_sig_length,1)+1j*randn(Tx_sig_length,1))/sqrt(2)*sqrt(noise_pow);
-    Rx_sig_H1 = Rx_sig + noise;
-    Rx_sig_H0 = noise;
+    noise = (randn(Tx_sig_length,1)+1j*randn(Tx_sig_length,1))/sqrt(2);
     
-    % ------ T Domain ZC Correlation -------
-    corr_out_H1(1:Rx_sig_length) = abs(conv(ZC_t_domain,Rx_sig_H1)).^2; % corr rx t-domain sig with ZC
-    corr_out_H0(1:Rx_sig_length) = abs(conv(ZC_t_domain,Rx_sig_H0)).^2; % corr rx t-domain sig with ZC
-    
-    % ----- Multi-Peak Detection ---------
-    if perfectSTO % Concept scenario where peak locations is know
-        peak_pow_H1 = sum(corr_out_H1(ZC_N:burst_length:end));
-        peak_pow_H0 = sum(corr_out_H0(ZC_N:burst_length:end));
-    else % Practical scenario where peak location is unknown
-        peak_pow_H1 = max(sum(reshape(corr_out_H1,burst_length,M+1),2));
-        peak_pow_H0 = max(sum(reshape(corr_out_H0,burst_length,M+1),2));
-    end
+    % ------- sweep all SNR values -------
+    for ss = 1:SNR_num
+        noise_pow = 10^(-SNR_range(ss)/10);
+        awgn = noise * sqrt(noise_pow);
+        Rx_sig_H1 = Rx_sig + awgn ;
+        Rx_sig_H0 = awgn;
+
+        % ------ T Domain ZC Correlation -------
+        corr_out_H1(1:Rx_sig_length) = abs(conv(ZC_t_domain,Rx_sig_H1)).^2; % corr rx t-domain sig with ZC
+        corr_out_H0(1:Rx_sig_length) = abs(conv(ZC_t_domain,Rx_sig_H0)).^2; % corr rx t-domain sig with ZC
+
+        
+        switch BFtype
+            % ----- Multi-Peak Detection ---------
+            case 'PN'
+                if STOinfo % Concept scenario where peak locations is know
+                    peak_pow_H1(ss) = sum(corr_out_H1(ZC_N:burst_length:end));
+                    peak_pow_H0(ss) = sum(corr_out_H0(ZC_N:burst_length:end));
+                else % Practical scenario where peak location is unknown
+                    peak_pow_H1(ss) = max(sum(reshape(corr_out_H1,burst_length,M+1),2));
+                    peak_pow_H0(ss) = max(sum(reshape(corr_out_H0,burst_length,M+1),2));
+                end
+
+            % ----- Single-Peak Detection ---------
+            case 'directional'
+                peak_pow_H1(ss) = max(corr_out_H1);
+                peak_pow_H0(ss) = max(corr_out_H0);
+                
+            case 'sector'
+                peak_pow_H1(ss) = max(corr_out_H1);
+                peak_pow_H0(ss) = max(corr_out_H0);
+        end % end of switch
+    end % end of SNR sweeping
 
 end
 
