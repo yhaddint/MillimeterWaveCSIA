@@ -21,7 +21,7 @@ function [ peak_pow_H1, peak_pow_H0 ] = run_PSS_detection( SNR_range, STOtype, S
             M = M_burst(1)*M_burst(2);
     end
     ZC_root = 29; % ZC root, a coprime number with ZC length
-    ZC_N = 255; % ZC sequence length
+    ZC_N = 127; % ZC sequence length
     burst_N = ZC_N*2; % number of sample in each burst (2OFDM symbol for now)
     Rx_sig_length = burst_N * M + ZC_N - 1; % signal length after ZC correlation;
 
@@ -119,12 +119,12 @@ function [ peak_pow_H1, peak_pow_H0 ] = run_PSS_detection( SNR_range, STOtype, S
 %             fprintf('combiner index %d\n',combiner_index); 
             w_vec = W_mat(:,combiner_index);
             v_vec = V_mat(:,precoder_index);
-            g_effective = (w_vec'*H_chan*v_vec);
+            g_effective = (w_vec'*H_chan0*v_vec);
             precoder_index_old = precoder_index;
             combiner_index_old = combiner_index;
         end
-%         index_debug(:,nn) = [precoder_index;combiner_index];
-%         g_save_debug(nn) = g_effective;
+        index_debug(:,nn) = [precoder_index;combiner_index];
+        g_save_debug(nn) = g_effective;
         Rx_sig(nn) = g_effective * Tx_sig(nn);
     end % end of sample sweeping
     
@@ -139,19 +139,19 @@ function [ peak_pow_H1, peak_pow_H0 ] = run_PSS_detection( SNR_range, STOtype, S
         Rx_sig_H0 = awgn;
 
         % ------ T Domain ZC Correlation -------
-        corr_out_H1(1:Rx_sig_length) = abs(conv(ZC_t_domain,Rx_sig_H1)).^2; % corr rx t-domain sig with ZC
-        corr_out_H0(1:Rx_sig_length) = abs(conv(ZC_t_domain,Rx_sig_H0)).^2; % corr rx t-domain sig with ZC
+        corr_out_H1(1:Rx_sig_length) = abs(conv(ZC_t_domain,Rx_sig_H1)/ZC_N).^2; % corr rx t-domain sig with ZC
+        corr_out_H0(1:Rx_sig_length) = abs(conv(ZC_t_domain,Rx_sig_H0)/ZC_N).^2; % corr rx t-domain sig with ZC
 
         
         switch BFtype
             % ----- Multi-Peak Detection ---------
             case 'PN'
                 if STOinfo % Concept scenario where peak locations is know
-                    peak_pow_H1(ss) = sum(corr_out_H1(ZC_N:burst_length:end));
-                    peak_pow_H0(ss) = sum(corr_out_H0(ZC_N:burst_length:end));
+                    peak_pow_H1(ss) = mean(corr_out_H1(ZC_N:burst_length:end));
+                    peak_pow_H0(ss) = mean(corr_out_H0(ZC_N:burst_length:end));
                 else % Practical scenario where peak location is unknown
-                    peak_pow_H1(ss) = max(sum(reshape(corr_out_H1,burst_length,M+1),2));
-                    peak_pow_H0(ss) = max(sum(reshape(corr_out_H0,burst_length,M+1),2));
+                    peak_pow_H1(ss) = max(mean(reshape(corr_out_H1,burst_length,M+1),2));
+                    peak_pow_H0(ss) = max(mean(reshape(corr_out_H0,burst_length,M+1),2));
                 end
 
             % ----- Single-Peak Detection ---------
