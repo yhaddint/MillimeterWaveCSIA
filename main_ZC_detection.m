@@ -2,7 +2,7 @@ clear;clc;
 
 % ------ script control parameter -------
 rng(2)
-perfectSTO = 1;
+STOinfo = 0; % Whether system know STO perfectly
 MCtimes = 1e2; % Monte Carlo simulation
 
 % ----- system parameters --------
@@ -73,7 +73,8 @@ for MCindex = 1:MCtimes
     % ----- received signal generation ------
     for nn=1:Tx_sig_length
         precoder_index = floor( (nn-1) / burst_length )+1;
-        combiner_index = floor( (nn + STO - 1) / burst_length )+1;
+        combiner_index_raw = floor( (nn + STO - 1) / burst_length )+1;
+        combiner_index = mod(combiner_index_raw-1,M)+1;
         w_vec = W_mat(:,combiner_index);
         v_vec = V_mat(:,precoder_index);
         Rx_sig(nn) = (w_vec'*H_chan*v_vec) * Tx_sig(nn);
@@ -89,10 +90,10 @@ for MCindex = 1:MCtimes
     corr_out_H0(1:Rx_sig_length) = abs(conv(ZC_t_domain,Rx_sig_H0)).^2; % corr rx t-domain sig with ZC
     
     % ----- Multi-Peak Detection ---------
-    if perfectSTO
+    if STOinfo % Concept scenario where peak locations is know
         peak_pow_H1(MCindex) = sum(corr_out_H1(ZC_N:burst_length:end));
         peak_pow_H0(MCindex) = sum(corr_out_H0(ZC_N:burst_length:end));
-    else
+    else % Practical scenario where peak location is unknown
         peak_pow_H1(MCindex) = max(sum(reshape(corr_out_H1,burst_length,M+1),2));
         peak_pow_H0(MCindex) = max(sum(reshape(corr_out_H0,burst_length,M+1),2));
     end

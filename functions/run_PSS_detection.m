@@ -160,8 +160,13 @@ function [ peak_pow_H1, peak_pow_H0 ] = run_PSS_detection( SNR_range, STOtype, S
                 peak_pow_H0(ss) = max(corr_out_H0);
                 
             case 'sector'
-                peak_pow_H1(ss) = max(corr_out_H1);
-                peak_pow_H0(ss) = max(corr_out_H0);
+                if STOinfo % Concept scenario where peak locations is know
+                    peak_pow_H1(ss) = max(corr_out_H1(ZC_N:burst_length:end));
+                    peak_pow_H0(ss) = max(corr_out_H0(ZC_N:burst_length:end));
+                else % Practical scenario where peak location is unknown
+                    peak_pow_H1(ss) = max(corr_out_H1);
+                    peak_pow_H0(ss) = max(corr_out_H0);
+                end
         end % end of switch
     end % end of SNR sweeping
 
