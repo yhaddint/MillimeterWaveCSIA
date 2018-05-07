@@ -15,29 +15,33 @@ end
 
 % ------ beam pattern test -------
 angle_test = 0;
-xdata = linspace(-pi/2,pi/2,181);
+% xdata = linspace(-pi/2,pi/2,181);
+xdata = linspace(pi/2,pi*3/2,181);
 figure
 subplot(121)
 polarplot(xdata,abs(FF'*BF0(:,1)),'linewidth',2);hold on
 polarplot(xdata,abs(FF'*BF0(:,3)),'linewidth',2);hold on
 polarplot(xdata,abs(FF'*BF0(:,5)),'linewidth',2);hold on
 polarplot(xdata,abs(FF'*BF0(:,7)),'linewidth',2);hold on
-thetalim([-90 90])
+% thetalim([-90 90])
+thetalim([90 270])
 ax = gca;
-ax.ThetaTick = -90:22.5:90;
+% ax.ThetaTick = -90:22.5:90;
+ax.ThetaTick = 90:22.5:270;
 ax.ThetaTickLabels = {'-90','-67.5','-45','-22.5','0','22.5','45','67.5','90'};
+% ax.ThetaTickLabels = {'90','67.5','45','22.5','0','-22.5','-45','-67.5','-90'};
 grid on
 
-subplot(122)
-polarplot(xdata,abs(FF'*BF0(:,2)),'linewidth',2);hold on
-polarplot(xdata,abs(FF'*BF0(:,4)),'linewidth',2);hold on
-polarplot(xdata,abs(FF'*BF0(:,6)),'linewidth',2);hold on
-polarplot(xdata,abs(FF'*BF0(:,8)),'linewidth',2);hold on
-thetalim([-90 90])
-ax = gca;
-ax.ThetaTick = -90:22.5:90;
-ax.ThetaTickLabels = {'-90','-67.5','-45','-22.5','0','22.5','45','67.5','90'};
-grid on
-grid on
+% subplot(122)
+% polarplot(xdata,abs(FF'*BF0(:,2)),'linewidth',2);hold on
+% polarplot(xdata,abs(FF'*BF0(:,4)),'linewidth',2);hold on
+% polarplot(xdata,abs(FF'*BF0(:,6)),'linewidth',2);hold on
+% polarplot(xdata,abs(FF'*BF0(:,8)),'linewidth',2);hold on
+% thetalim([-90 90])
+% ax = gca;
+% ax.ThetaTick = -90:22.5:90;
+% ax.ThetaTickLabels = {'-90','-67.5','-45','-22.5','0','22.5','45','67.5','90'};
+% grid on
+% grid on
 
 
