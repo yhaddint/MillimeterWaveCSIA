@@ -2,8 +2,8 @@
 
 clear;clc;
 % --- codebook construction -----
-Nt = 32;
-M = 8;
+Nt = 8;
+M = 4;
 type = 'sector';
 [ BF0 ] = get_IA_BF( Nt, M, type );
 
@@ -19,10 +19,10 @@ angle_test = 0;
 xdata = linspace(pi/2,pi*3/2,181);
 figure
 subplot(121)
-polarplot(xdata,abs(FF'*BF0(:,1)),'linewidth',2);hold on
-polarplot(xdata,abs(FF'*BF0(:,3)),'linewidth',2);hold on
-polarplot(xdata,abs(FF'*BF0(:,5)),'linewidth',2);hold on
-polarplot(xdata,abs(FF'*BF0(:,7)),'linewidth',2);hold on
+polarplot(xdata,20*log10(abs(FF'*BF0(:,1))),'linewidth',2);hold on
+% polarplot(xdata,abs(FF'*BF0(:,3)),'linewidth',2);hold on
+% polarplot(xdata,abs(FF'*BF0(:,5)),'linewidth',2);hold on
+% polarplot(xdata,abs(FF'*BF0(:,7)),'linewidth',2);hold on
 % thetalim([-90 90])
 thetalim([90 270])
 ax = gca;

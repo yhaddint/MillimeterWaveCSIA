@@ -5,9 +5,10 @@ clear;clc;
 Nt_x = 16;
 Nt_y = 16;
 A_stopband = 30; % attenuation outside mainlobe (dB)
-vec_x = get_FSM_KW_codebook( 15/180*pi, 0/180*pi, Nt_x, A_stopband);
-vec_y = get_FSM_KW_codebook( 15/180*pi, 0/180*pi, Nt_y, A_stopband);
-% vec = exp(1j*pi*(0:Nt-1).'*sin(45/180*pi));
+% vec_x = get_FSM_KW_codebook( 15/180*pi, 0/180*pi, Nt_x, A_stopband);
+% vec_y = get_FSM_KW_codebook( 15/180*pi, 0/180*pi, Nt_y, A_stopband);
+vec_x = exp(1j*pi*(0:Nt_x-1).'*sin(45/180*pi));
+vec_y = exp(1j*pi*(0:Nt_y-1).'*sin(45/180*pi));
 vec = kron(vec_x,vec_y);
 vec_norm = vec./norm(vec);
 
@@ -39,6 +40,8 @@ xlabel('Azimuth (deg)')
 ylabel('Elevation (deg)')
 zlabel('Gain (dB)')
 colorbar
-
+colormap('jet')
+caxis([-20,15])
+zlim([-20,20])
 %%
 patternCustom(response,xdata,ydata)
