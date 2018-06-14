@@ -1,31 +1,34 @@
 clear;clc;
 
 % ------ script control parameters -------
-rng(2)
-plot_cdf = 1;
-MCtimes = 5e2; % Monte Carlo simulation
+rng(3)
+plot_cdf = 0;
+MCtimes = 1e3; % Monte Carlo simulation
 Pfa = 0.05; % target pfa in setting threshold
-SNR_data_range = -40:2.5:-15;
+SNR_data_range = -40:2.5:0;
 SNR_range = SNR_data_range + 0;
 SNR_num = length(SNR_range);
 
 %% Monte Carlo evaluations
 
 STO = 'zero'; % Type of sample timing offset
-BFtype = 'sector'; % Type of beamformer in IA
-STOinfo = 1; % Assuming perfect knowledge of peak
+BFtype = 'PN'; % Type of beamformer in IA: 'sector', 'PN', or 'directional'
+STOinfo = 0; % Assuming perfect knowledge of peak
 M_burst = [8, 4]; % Number of bursts in IA; For directional use [M_Tx_BF,M_Rx_BF] for beams in BS and UE
+CFO = 10; % with unit positive-minus ppm
 
 % ------------ MC iterations (each has all SNRs)--------------
 for MCindex = 1:MCtimes
     clc
     fprintf('Iteration %d:\n',MCindex);
     [ peak_pow_H1(:,MCindex),...
-      peak_pow_H0(:,MCindex) ] = run_PSS_detection( SNR_range,...
-                                                    STO,...
-                                                    STOinfo,...
-                                                    BFtype,...
-                                                    M_burst);
+      peak_pow_H0(:,MCindex),...
+      peakindex_H1(:,MCindex)] = run_PSS_detection_CFO( SNR_range,...
+                                                        STO,...
+                                                        STOinfo,...
+                                                        BFtype,...
+                                                        M_burst,...
+                                                        CFO);
 end
 
 %% % --------- Detection based on emprical threshold --------
@@ -80,10 +83,11 @@ for ss = 1:SNR_num
 end
 
 %% --------- Detection based on theoretical threshold --------
-% for ss = 1:SNR_num
-%     Pm_sim(ss) = sum(peak_pow_H1(ss,:)<TH_theo(ss))/MCtimes;
-%     Pfa_sim(ss) = sum(peak_pow_H0(ss,:)>TH_theo(ss))/MCtimes;
-% end
+for ss = 1:SNR_num
+    Pm_sim(ss) = sum(peak_pow_H1(ss,:)<TH_theo(ss))/MCtimes;
+    PTOm_sim(ss) = sum((peakindex_H1(ss,:)~=127)|(peak_pow_H1(ss,:)<TH_theo(ss)))/MCtimes;
+    Pfa_sim(ss) = sum(peak_pow_H0(ss,:)>TH_theo(ss))/MCtimes;
+end
 
 %% ------- Detection statistics in H1 --------------
 clearvars theo_cdf_H1
@@ -146,12 +150,14 @@ end
 %% Figure
 figure
 subplot(211)
+
+plot(SNR_data_range,PTOm_sim,'-x');hold on
 plot(SNR_data_range,Pm_sim,'-o');hold on
 plot(SNR_data_range,Pm_theo);hold on
 grid on
 xlabel('SNR (dB)')
 ylabel('Miss Detection of PSS')
-legend('Sim.','Theo.')
+legend('PTOM Sim.','PM Sim.','PM Theo.')
 subplot(212)
 plot(SNR_data_range,Pfa_sim,'-o');hold on
 grid on
