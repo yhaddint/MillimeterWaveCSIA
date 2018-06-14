@@ -2,12 +2,12 @@
 
 clear;clc;
 % --- codebook construction -----
-Nt_x = 16;
+Nt_x = 2;
 Nt_y = 16;
-A_stopband = 30; % attenuation outside mainlobe (dB)
+A_stopband = 10; % attenuation outside mainlobe (dB)
 % vec_x = get_FSM_KW_codebook( 15/180*pi, 0/180*pi, Nt_x, A_stopband);
 % vec_y = get_FSM_KW_codebook( 15/180*pi, 0/180*pi, Nt_y, A_stopband);
-vec_x = exp(1j*pi*(0:Nt_x-1).'*sin(45/180*pi));
+vec_x = exp(1j*pi*(0:Nt_x-1).'*sin(0/180*pi));
 vec_y = exp(1j*pi*(0:Nt_y-1).'*sin(45/180*pi));
 vec = kron(vec_x,vec_y);
 vec_norm = vec./norm(vec);
@@ -22,7 +22,9 @@ for k1 = 1:(angle_range*2+1)
     for k2 = 1:(angle_range*2+1)
         ang_sig_x = exp(1j*pi*(0:Nt_x-1).'*sin((k1 - angle_range -1 )/180*pi));
         ang_sig_y = exp(1j*pi*(0:Nt_y-1).'*sin((k2 - angle_range -1 )/180*pi));
-        response(k1,k2) = 20*log10(abs(kron(ang_sig_x,ang_sig_y)'*v_approx+1e-1));
+        response(k1,k2) = abs(kron(ang_sig_x,ang_sig_y)'*v_approx+1e-3);
+        response_dB(k1,k2) = 20*log10(abs(kron(ang_sig_x,ang_sig_y)'*v_approx+1e-3));
+
     end
 end
 % response = 20*log10(abs(FF'*v_approx)+1e-1);
@@ -34,8 +36,8 @@ xdata = linspace(-pi/2,pi/2,181).';
 ydata = linspace(-pi/2,pi/2,181).';
 [X,Y] = meshgrid(xdata,ydata);
 figure
-s = surf(X/pi*180,Y/pi*180,response);
-s.EdgeColor  = 'none'
+s = surf(X/pi*180,Y/pi*180,response_dB);
+s.EdgeColor  = 'none';
 xlabel('Azimuth (deg)')
 ylabel('Elevation (deg)')
 zlabel('Gain (dB)')
@@ -44,4 +46,7 @@ colormap('jet')
 caxis([-20,15])
 zlim([-20,20])
 %%
-patternCustom(response,xdata,ydata)
+x_new = fliplr(-180:1:179);
+y_new = (-180:1:180).';
+figure
+patternCustom(response(1:360,1:361).',x_new,y_new);
