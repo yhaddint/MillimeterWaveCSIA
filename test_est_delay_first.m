@@ -11,7 +11,7 @@ path_num = 1; % Num of rays in a cluster
 Nr = 8; % Number of antenna in Rx
 Nt = 64;
 M = 64; % Length of training
-MCtimes = 5e1; % Num of Monte Carlo Sim.
+MCtimes = 3; % Num of Monte Carlo Sim.
 AOAspread2 = 0;
 AOAspread = 0;
 AODspread2 = 0;
@@ -20,11 +20,12 @@ SNR_num = 5;
 SNR_range = linspace(-20,20,SNR_num);
 Ts = 1/(50e6);
 Nb = 512;
-CFO_ppm = 1; % CFO in ppm
-CFO = rand*(28e9/1e6*CFO_ppm); % With unit Hz
+CFO_ppm = 0.5; % CFO in ppm
+CFO = (28e9/1e6*CFO_ppm); % With unit Hz
 eF = CFO*Ts*2*pi; % 
 P = 128;
 DFT = dftmtx(P);
+to_est_CFO=1
 
 %-------- dictionary generation -------------
 cand_num_r = 61;
@@ -162,7 +163,7 @@ for MCindex = 1:MCtimes
         % CFO estimation
         sig_ave = mean(reshape(sig_noisy,P,M),2);
         for tt=1:tau_num
-            if MCindex==15 & tt==6
+            if MCindex==1 & tt==6
                 apple=1;
             end
             sig_tone = sig_ave.*conj(delay_mtx(:,tt));
@@ -186,8 +187,37 @@ for MCindex = 1:MCtimes
             if dd==3691
                 apple=1;
             end
+            
+            sig_cand = zeros(P*M,1);
+%             for mm=1:M
+%                 indextemp = (mm-1)*P+1:mm*P;
+%                 sig_cand(indextemp) = delay_mtx(:,maxindex)*Measure_mat_new(mm,dd);
+%             end
             sig_cand = kron(Measure_mat_new(:,dd),delay_mtx(:,maxindex));
-            score_final(dd) = abs(sig_noisy'*(sig_cand.* phase_error))/norm(sig_cand)^2;
+            
+            % use estimated CFO or perfect CFO to comp phase error
+            if to_est_CFO
+                
+                sig_burst = mean(reshape(sig_noisy.*(conj(sig_cand)./abs(sig_cand)),P,M),1).';
+                
+                % adjust N/A numbers
+                sig_burst(isnan(sig_burst))=0;
+                
+                % Estimation of CFO for adjacent bursts
+                for mm=1:M-1
+                    CFO_hat_new(mm) = angle(sig_burst(mm+1).*conj(sig_burst(mm)));
+                end
+                
+                % weighted average
+                index_new = [abs(sig_burst(1:M-1)),abs(sig_burst(2:M))];
+                CFO_weight = min(index_new,[],2);
+                CFO_weight_norm = CFO_weight/sum(CFO_weight);
+                CFO_est = (CFO_hat_new*CFO_weight_norm)/512;
+                
+                phase_error_mat = exp(1j*CFO_est*(0:P-1)') * exp(1j*CFO_est*Nb*(0:M-1));
+                phase_error = reshape(phase_error_mat,M*P,1);
+            end
+            score_final(dd) = abs(sig_noisy'*(sig_cand.* phase_error))/(sig_cand'*sig_cand);
         end
         [~,bestindex_comp(MCindex)] = max(abs(score_final));
         bestrow = floor((bestindex_comp(MCindex)-1)/cand_num_r)+1;
@@ -254,6 +284,6 @@ ylabel('RMSE of normalized delay [ns]')
 % legend('CRLB Ray 1','CRLB Ray 2')
 %% best should be 3691
 for mm=1:10
-    temp(mm) = (W(:,mm)'*arx(:,ll)) * conj(F(:,mm)'*atx(:,ll));
+    tempchan(mm) = (W(:,mm)'*arx(:,ll)) * conj(F(:,mm)'*atx(:,ll));
 end
-[Measure_mat_new(1:10,3691) 22.6175*temp.']
+[Measure_mat_new(1:10,3691) 22.6175*tempchan.']
