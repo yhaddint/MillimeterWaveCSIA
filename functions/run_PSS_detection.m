@@ -1,4 +1,4 @@
-function [ peak_pow_H1, peak_pow_H0 ] = run_PSS_detection( SNR_range, STOtype, STOinfo, BFtype, M_burst )
+function [ peak_pow_H1, peak_pow_H0, peakindex_H1 ] = run_PSS_detection( SNR_range, STOtype, STOinfo, BFtype, M_burst )
 %RUN_PSS_DETECTION Summary of this function goes here
 %   Detailed explanation goes here
 
@@ -150,7 +150,7 @@ function [ peak_pow_H1, peak_pow_H0 ] = run_PSS_detection( SNR_range, STOtype, S
                     peak_pow_H1(ss) = mean(corr_out_H1(ZC_N:burst_length:end));
                     peak_pow_H0(ss) = mean(corr_out_H0(ZC_N:burst_length:end));
                 else % Practical scenario where peak location is unknown
-                    peak_pow_H1(ss) = max(mean(reshape(corr_out_H1,burst_length,M+1),2));
+                    [peak_pow_H1(ss) peakindex_H1(ss)] = max(mean(reshape(corr_out_H1,burst_length,M+1),2));
                     peak_pow_H0(ss) = max(mean(reshape(corr_out_H0,burst_length,M+1),2));
                 end
 

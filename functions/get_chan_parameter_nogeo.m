@@ -30,15 +30,15 @@ function [ raygain, raydelay, ray_AOA_azim, ray_AOD_azim ] =...
 %   OP: ray_AOD_azim, cluster_num by ray_num matrix with AOD for each ray
 
 
-if cluster_num>2
-    fprintf('This function only support up to 2 multipath clusters\n');
+if cluster_num>4
+    fprintf('This function only support up to 4 multipath clusters\n');
 end
 
 if max(sigma_delay_spread)>1e-6
     fprintf('Delay spread has beter not to exceed 1e-6 second\n');
 end
 
-cluster_delay = [300e-9,250e-9]; % Mean delay of two multipath clusters
+cluster_delay = [300e-9,250e-9,100e-9,200e-9]; % Mean delay of two multipath clusters
 
 % Zero initializations
 raygain = zeros(cluster_num, ray_num);

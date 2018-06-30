@@ -10,14 +10,14 @@ rng(3); %random seed
 path_num = 1; % Num of rays in a cluster
 Nr = 8; % Number of antenna in Rx
 Nt = 64;
-M = 32; % Length of training
-MCtimes = 50; % Num of Monte Carlo Sim.
+M = 64; % Length of training
+MCtimes = 500; % Num of Monte Carlo Sim.
 AOAspread2 = 0;
 AOAspread = 0;
 AODspread2 = 0;
 AODspread = 0;
 SNR_num = 50;
-SNR_range = linspace(-35,15,SNR_num);
+SNR_range = linspace(-20,20,SNR_num);
 Ts = 1/(50e6);
 Nb = 512;
 CFO_ppm = 1; % CFO in ppm
@@ -57,8 +57,8 @@ for MCindex = 1:MCtimes
 %     g_cmplx = exp(1j*rand(ray_num,1)*2*pi)/sqrt(ray_num);
 %     g = g_cmplx;
     % Rotate of ray
-    tau = rand * (200e-9);
-    tau_samp = mod(tau/Ts*2*pi,2*pi);
+    tau = rand * (100e-9);
+    tau_samp = tau/Ts*2*pi;
     g_ray = (randn+1j*randn)/sqrt(2);
 
     % Pre-compute some vectors/matrices in FIM
@@ -75,8 +75,8 @@ for MCindex = 1:MCtimes
         dtx(:,pathindex) = Datx(:,pathindex).*atx(:,pathindex);
         
         % Delay response and its derivative over tau
-        fvec(:,pathindex) = exp(1j * (0:P-1)' * tau_samp);
-        Dfvec(:,pathindex) = 1j * (0:P-1)';
+        fvec(:,pathindex) = exp(-1j * (0:P-1)' * tau_samp / P);
+        Dfvec(:,pathindex) = -1j * (0:P-1)' / P;
         dfvec(:,pathindex) = Dfvec(:,pathindex).*fvec(:,pathindex);
     end
     
@@ -85,7 +85,7 @@ for MCindex = 1:MCtimes
     for mm=1:M
         timeindex = ((mm-1)*Nb+0):((mm-1)*Nb+P-1);
         Dqvec(:,mm) = 1j * (timeindex).';
-        dqvec(:,mm) = exp(1j*Nb*(mm-1)*CFO)*qvec.*Dqvec(:,mm);
+        dqvec(:,mm) = exp(1j*Nb*(mm-1)*eF)*qvec.*Dqvec(:,mm);
     end
     
     
@@ -111,17 +111,17 @@ for MCindex = 1:MCtimes
         for mm=1:M
             index = (mm-1)*P+1:mm*P;
             vdcfo(index) = g_ray(ll) * (W(:,mm)'*arx(:,ll)) * conj(F(:,mm)'*atx(:,ll))...
-                *(diag(dqvec(:,mm))*DFT'*(fvec.*symb)) * exp(1j*Nb*(mm-1)*CFO);
+                *(diag(dqvec(:,mm))*DFT'*(fvec.*symb)) * exp(1j*Nb*(mm-1)*eF);
             vdtheta(index) = g_ray(ll) * (W(:,mm)'*arx(:,ll)) * conj(F(:,mm)'*dtx(:,ll))...
-                *(diag(qvec)*DFT'*(fvec.*symb)) * exp(1j*Nb*(mm-1)*CFO);
+                *(diag(qvec)*DFT'*(fvec.*symb)) * exp(1j*Nb*(mm-1)*eF);
             vdphi(index) = g_ray(ll) * (W(:,mm)'*drx(:,ll)) * conj(F(:,mm)'*atx(:,ll))...
-                *(diag(qvec)*DFT'*(fvec.*symb)) * exp(1j*Nb*(mm-1)*CFO);
+                *(diag(qvec)*DFT'*(fvec.*symb)) * exp(1j*Nb*(mm-1)*eF);
             vdtau(index) = g_ray(ll) * (W(:,mm)'*arx(:,ll)) * conj(F(:,mm)'*atx(:,ll))...
-                *(diag(qvec)*DFT'*(dfvec.*symb)) * exp(1j*Nb*(mm-1)*CFO);
+                *(diag(qvec)*DFT'*(dfvec.*symb)) * exp(1j*Nb*(mm-1)*eF);
             vdalpha(index) = (W(:,mm)'*arx(:,ll)) * conj(F(:,mm)'*atx(:,ll))...
-                *(diag(qvec)*DFT'*(fvec.*symb)) * exp(1j*Nb*(mm-1)*CFO);
+                *(diag(qvec)*DFT'*(fvec.*symb)) * exp(1j*Nb*(mm-1)*eF);
             vdbeta(index) = 1j * (W(:,mm)'*arx(:,ll)) * conj(F(:,mm)'*atx(:,ll))...
-                *(diag(qvec)*DFT'*(fvec.*symb)) * exp(1j*Nb*(mm-1)*CFO);
+                *(diag(qvec)*DFT'*(fvec.*symb)) * exp(1j*Nb*(mm-1)*eF);
         end
     end
 
@@ -207,7 +207,7 @@ for MCindex = 1:MCtimes
         sigman2 = 10^(-SNR_range(ss)/10);
         
         % Evaluate FIM
-        J = 2/sigman2 * J_00;
+        J = 1/sigman2 * J_00;
         
         % Evaluation of FIM with single rays
 %         temp = inv(J(1:3,1:3));
@@ -216,11 +216,12 @@ for MCindex = 1:MCtimes
         CRLB_CFO(ss,MCindex) = sqrt(temp(1,1))*(1/Ts/2/pi);
         CRLB_theta(ss,MCindex) = sqrt(temp(2,2))*(1/pi*180);
         CRLB_phi(ss,MCindex) = sqrt(temp(3,3))*(1/pi*180);
+        CRLB_tau(ss,MCindex) = sqrt(temp(4,4))*(Ts/2/pi/1e-9);
     end
 end
 %% Plot CRLB of angle est./tracking
 figure
-subplot(211)
+subplot(311)
 semilogy(SNR_range,mean(CRLB_theta,2));hold on
 semilogy(SNR_range,mean(CRLB_phi,2));hold on
 grid on
@@ -228,13 +229,19 @@ legend('Theta','Phi')
 xlabel('Point-to-Point SNR [dB]')
 ylabel('RMSE of AoA/AoD [deg]')
 
-subplot(212)
+subplot(312)
 semilogy(SNR_range,mean(CRLB_CFO,2));hold on
 grid on
 title('CRLB of CFO')
 xlabel('Point-to-Point SNR [dB]')
 ylabel('RMSE of CFO [Hz]')
 
+subplot(313)
+semilogy(SNR_range,mean(CRLB_tau,2));hold on
+grid on
+title('CRLB of tau')
+xlabel('Point-to-Point SNR [dB]')
+ylabel('RMSE of CFO [ns]')
 % figure
 % semilogy(SNR_range,mean(CRLB_rest1,2));hold on
 % semilogy(SNR_range,mean(CRLB_rest1,2));hold on

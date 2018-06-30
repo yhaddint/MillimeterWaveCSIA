@@ -11,11 +11,11 @@ SNR_num = length(SNR_range);
 
 %% Monte Carlo evaluations
 
-STO = 'zero'; % Type of sample timing offset
-BFtype = 'PN'; % Type of beamformer in IA: 'sector', 'PN', or 'directional'
+STO = 'random'; % Type of sample timing offset
+BFtype = 'sector'; % Type of beamformer in IA: 'sector', 'PN', or 'directional'
 STOinfo = 0; % Assuming perfect knowledge of peak
-M_burst = [8, 4]; % Number of bursts in IA; For directional use [M_Tx_BF,M_Rx_BF] for beams in BS and UE
-CFO = 10; % with unit positive-minus ppm
+M_burst = [16, 4]; % Number of bursts in IA; For directional use [M_Tx_BF,M_Rx_BF] for beams in BS and UE
+CFO = 0; % with unit positive-minus ppm
 
 % ------------ MC iterations (each has all SNRs)--------------
 for MCindex = 1:MCtimes

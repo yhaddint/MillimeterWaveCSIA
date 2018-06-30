@@ -1,8 +1,30 @@
-function [ peak_pow_H1, peak_pow_H0, peakindex_H1 ] = run_PSS_detection_CFO( SNR_range, STOtype, STOinfo, BFtype, M_burst, CFO )
+function [  peak_pow_H1,...
+            peak_pow_H0,...
+            peakindex_H1 ] = run_PSS_detection_CFO( SNR_range,...
+                                                STOtype,...
+                                                STOinfo,...
+                                                BFtype,...
+                                                M_burst,...
+                                                CFO )
 %RUN_PSS_DETECTION Summary of this function goes here
-%   Detailed explanation goes here
-    % Convert CFO ppm into
-    CFO_samp = (rand*2-1)*CFO*28e3/50e6*2*pi; %with unit rad per sample
+%[  peak_pow_H1,...
+%   peak_pow_H0,...
+%   peakindex_H1 ] = run_PSS_detection_CFO( SNR_range,...
+%                                           STOtype,...
+%                                           STOinfo,...
+%                                           BFtype,...
+%                                           M_burst,...
+%                                           CFO )
+% ------ Input explainations:------------
+% SNR_range: SNR range in dB scale
+% STOtype: 'zero' or 'random'
+% STOinfo: 0 or 1 to indicate whether system has timing info
+% BFtype: use 'PN', 'directional', or 'sector'
+% M_burst: number of burst in discovery
+% CFO: Actual CFO value in the unit of ppm
+    
+    % Convert CFO ppm into phase rotate in discrete time 
+    CFO_samp = CFO*28e3/50e6*2*pi; %with unit rad per sample
     
     % ------ SNR parameters ---------
     SNR_num = length(SNR_range);
@@ -12,8 +34,8 @@ function [ peak_pow_H1, peak_pow_H0, peakindex_H1 ] = run_PSS_detection_CFO( SNR
     peak_pow_H0 = zeros(SNR_num,1);
     
     % ----- system parameters --------
-    Nt = 32; % Number of antenna in tx
-    Nr = 8; % Number of antenna in Rx
+    Nt = 64; % Number of antenna in tx
+    Nr = 16; % Number of antenna in Rx
     switch BFtype
         case 'directional'
             M = Nt*Nr;
@@ -151,6 +173,7 @@ function [ peak_pow_H1, peak_pow_H0, peakindex_H1 ] = run_PSS_detection_CFO( SNR
                 if STOinfo % Concept scenario where peak locations is know
                     peak_pow_H1(ss) = mean(corr_out_H1(ZC_N:burst_length:end));
                     peak_pow_H0(ss) = mean(corr_out_H0(ZC_N:burst_length:end));
+                    peakindex_H1(ss) = 0;
                 else % Practical scenario where peak location is unknown
                     [peak_pow_H1(ss) peakindex_H1(ss)] = max(mean(reshape(corr_out_H1,burst_length,M+1),2));
                     peak_pow_H0(ss) = max(mean(reshape(corr_out_H0,burst_length,M+1),2));
@@ -165,9 +188,14 @@ function [ peak_pow_H1, peak_pow_H0, peakindex_H1 ] = run_PSS_detection_CFO( SNR
                 if STOinfo % Concept scenario where peak locations is know
                     peak_pow_H1(ss) = max(corr_out_H1(ZC_N:burst_length:end));
                     peak_pow_H0(ss) = max(corr_out_H0(ZC_N:burst_length:end));
+                    peakindex_H1(ss) = 0;
                 else % Practical scenario where peak location is unknown
                     peak_pow_H1(ss) = max(corr_out_H1);
                     peak_pow_H0(ss) = max(corr_out_H0);
+                    peakindex_H1(ss) = 0;
+%                     [peak_pow_H1(ss) peakindex_H1(ss)] = max(mean(reshape(corr_out_H1,burst_length,M+1),2));
+%                     peak_pow_H0(ss) = max(mean(reshape(corr_out_H0,burst_length,M+1),2));
+
                 end
         end % end of switch
     end % end of SNR sweeping
