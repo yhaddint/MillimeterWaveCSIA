@@ -2,7 +2,7 @@ clear;clc;
 
 % ------ script control parameters -------
 rng(3)
-plot_cdf = 0;
+plot_cdf = 1;
 MCtimes = 1e3; % Monte Carlo simulation
 Pfa = 0.05; % target pfa in setting threshold
 SNR_data_range = -40:2.5:0;
@@ -12,7 +12,7 @@ SNR_num = length(SNR_range);
 %% Monte Carlo evaluations
 
 STO = 'random'; % Type of sample timing offset
-BFtype = 'sector'; % Type of beamformer in IA: 'sector', 'PN', or 'directional'
+BFtype = 'PN'; % Type of beamformer in IA: 'sector', 'PN', or 'directional'
 STOinfo = 0; % Assuming perfect knowledge of peak
 M_burst = [16, 4]; % Number of bursts in IA; For directional use [M_Tx_BF,M_Rx_BF] for beams in BS and UE
 CFO = 0; % with unit positive-minus ppm

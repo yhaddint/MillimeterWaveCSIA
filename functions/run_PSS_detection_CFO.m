@@ -40,7 +40,7 @@ function [  peak_pow_H1,...
         case 'directional'
             M = Nt*Nr;
         case 'PN'
-            M = M_burst(1);
+            M = M_burst(1)*M_burst(2);
         case 'sector'
             M = M_burst(1)*M_burst(2);
     end
