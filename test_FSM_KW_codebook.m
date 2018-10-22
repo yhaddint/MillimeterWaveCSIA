@@ -1,25 +1,25 @@
-% This script evaluates beam pattern of different beamformer used in IA
+% This script evaluates beam pattern of different beamformer used in
+% tracking
 
 clear;clc;
 % --- codebook construction -----
 Nt = 16;
 A_stopband = 10; % attenuation outside mainlobe (dB)
-vec1 = get_FSM_KW_codebook( 22.5/180*pi, 45/180*pi, Nt, A_stopband);
-
-% vec = exp(1j*pi*(0:Nt-1).'*sin(45/180*pi));
-% vec_norm = vec./norm(vec);
+beam_width = 5/180*pi;
+steer_dir = 0/180*pi;
+vec1 = get_FSM_KW_codebook( steer_dir, beam_width, Nt, A_stopband);
 
 % ------- test hybrid approximation-------
-phase_bits = 10;
+phase_bits = 10; % phase shifter quantization; set to 10 if don't care
 vec = get_hybrid_approx( vec1, phase_bits );
-
 vec_norm = vec./norm(vec);
+
 % ------ spatial angle vector of ULA -------
 angle_range = 90;
 for kk = 1:(angle_range*2+1)
     FF(:,kk) = exp(1j*pi*(0:Nt-1).'*sin((kk - angle_range -1 )/180*pi));
 end
-response = 20*log10(abs(FF'*vec_norm)+1e-1);
+response = 20*log10(abs(FF'*vec1)+1e-1);
 
 % ------ beam pattern test -------
 angle_test = 0;
