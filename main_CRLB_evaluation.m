@@ -2,25 +2,26 @@
 % Script control parameter
 %-------------------------------------
 clear;clc;
-rng(3); %random seed
+rng(2); %random seed
 % load probe_BF
 %-------------------------------------
 % System Parameters
 %-------------------------------------
 path_num = 1; % Num of rays in a cluster
 Nr = 8; % Number of antenna in Rx
-Nt = 64;
+Nt = 32;
 M = 64; % Length of training
-MCtimes = 500; % Num of Monte Carlo Sim.
+MCtimes = 200; % Num of Monte Carlo Sim.
 AOAspread2 = 0;
 AOAspread = 0;
 AODspread2 = 0;
 AODspread = 0;
 SNR_num = 50;
-SNR_range = linspace(-20,20,SNR_num);
-Ts = 1/(50e6);
+SNR_range = linspace(-30,20,SNR_num);
+BW = 57.6e6;
+Ts = 1/BW;
 Nb = 512;
-CFO_ppm = 1; % CFO in ppm
+CFO_ppm = 5; % CFO in ppm
 CFO = 28e9/1e6*CFO_ppm; % With unit Hz
 eF = CFO*Ts*2*pi; % 
 P = 128;

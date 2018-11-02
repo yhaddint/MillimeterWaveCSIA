@@ -8,28 +8,31 @@ rng(3); %random seed
 % System Parameters
 %-------------------------------------
 path_num = 1; % Num of rays in a cluster
-Nr = 16; % Number of antenna in Rx
-Nt = 64;
+Nr = 32; % Number of antenna in Rx
+Nt = 128;
 M = 64; % Length of training
-MCtimes = 500; % Num of Monte Carlo Sim.
+MCtimes = 1000; % Num of Monte Carlo Sim.
 AOAspread2 = 0;
 AOAspread = 0;
 AODspread2 = 0;
 AODspread = 0;
-SNR_num = 9;
-SNR_range = linspace(-20,20,SNR_num);
-Ts = 1/(50e6);
-Nb = 512;
-CFO_ppm = 0.5; % CFO in ppm
+SNR_num = 13;
+SNR_range = linspace(-30,0,SNR_num);
+BW = 57.6e6; % IA bandiwdth
+Ts = 1/BW; % Sample duration
+Nb = 512; % Sample per SS burst
+CFO_ppm = 4.5; % CFO in ppm
 CFO = (28e9/1e6*CFO_ppm); % With unit Hz
 eF = CFO*Ts*2*pi; % 
 P = 128;
 DFT = dftmtx(P);
 to_est_CFO=1;
+max_ite_num = 1e3;
+refine_CFO = 1; % refine CFO when coarse estimation of AoA/AoD (long long time!!!)
 
 %-------- dictionary generation -------------
-cand_num_r = 61;
-cand_num_t = 121;
+cand_num_r = 65;
+cand_num_t = 255;
 dict_num = cand_num_r*cand_num_t;
 
 cand_y = zeros(M,cand_num_r*cand_num_t);
@@ -46,14 +49,23 @@ phase_error_mat = kron(exp(1j*eF*Nb*(0:M-1)),exp(1j*eF*(0:P-1)'));
 phase_error = reshape(phase_error_mat,M*P,1);
 
 
+% ---- signal length parameters --------
+ZC_root = 29; % ZC root, a coprime number with ZC length
+ZC_N = 127; % ZC sequence length
+seq = lteZadoffChuSeq(ZC_root,ZC_N);
+                
+debug_flag = 0;           
 
-                
-                
 % For loop for Monte Carlo Simulations (realization of g, angle spread, and beamformer)
 for MCindex = 1:MCtimes
     
     clc
     fprintf('iteration %d:\n',MCindex);
+    
+%     debug_flag = 0;
+%     if MCindex==1
+%         debug_flag = 1;
+%     end
     
     % Receiver beamformer: 1) quasi-omni beam from random steering mtx; 2)
     % directional beam from angle steering vector
@@ -87,13 +99,18 @@ for MCindex = 1:MCtimes
 
     % AoA of rays with disired seperation
     phi = zeros(path_num,1);
-    phi0(MCindex) = (rand*10-5)/180*pi;
+    phi0(MCindex) = (rand*90-45)/180*pi;
     phi = phi0(MCindex) + randn(path_num,1) * AOAspread;
 
     % AoD of rays with disired seperation
     theta = zeros(path_num,1);
-    theta0(MCindex) = (rand*10-5)/180*pi;
+    theta0(MCindex) = (rand*90-45)/180*pi;
     theta = theta0(MCindex) + randn(path_num,1) * AODspread;
+    
+    % Find True AoA/AoD in grid (for debug)
+    [~,row_true] = min(abs(cand_angle_r - phi0(MCindex)));
+    [~,col_true] = min(abs(cand_angle_t - theta0(MCindex)));
+    index_true = (col_true-1)*cand_num_r + row_true;
 
 %     % Gain
 %     g_cmplx = exp(1j*rand(ray_num,1)*2*pi)/sqrt(ray_num);
@@ -146,9 +163,9 @@ for MCindex = 1:MCtimes
     vdalpha = zeros(P*M,1);
     vdbeta = zeros(P*M,1);
     
-    % Received signals
-    symb = exp(1j*rand(P,1)*2*pi);
-    tau_num = 1000;
+    % Received signals (Using random symbol or ZC sequence)
+    symb = [seq;1]; %exp(1j*rand(P,1)*2*pi);
+    tau_num = 500;
     delay_cand = linspace(0,100,tau_num)*1e-9/Ts*2*pi;
     for tt=1:tau_num
         delay_mtx(:,tt) = DFT'*(exp(-1j * (0:P-1)' * delay_cand(tt) / P).*symb);
@@ -164,51 +181,76 @@ for MCindex = 1:MCtimes
     end
     
     awgn = (randn(P*M,1)+1j*randn(P*M,1))/sqrt(2);
-    % For loop for SNR
-
+    
+    % ------------- For loop for Various SNR ----------------------
     for ss = 1:SNR_num
         
-        % SNR and addint awgn
+        % SNR and Adding AWGN to Rx Signal
         sigman2 = 10^(-SNR_range(ss)/10);
         sig_noisy = sig_rx + awgn * sqrt(sigman2);
-
-        % CFO estimation
+        
+        % -------- CFO Estimation and Delay Matching Pursuit ------------
         sig_ave = mean(reshape(sig_noisy,P,M),2);
         for tt=1:tau_num
-            if MCindex==1 & tt==6
-                apple=1;
-            end
-            sig_tone = sig_ave.*conj(delay_mtx(:,tt));
+%             if MCindex==1 & tt==6
+%                 apple=1;
+%             end
+            
+            % If selected delay candidate is true, sig.*conj(p_kx) is like
+            % tone signal
+            sig_tone = sig_ave.*conj(delay_mtx(:,tt))./abs(delay_mtx(:,tt)).^2;
+            
+%             % Method1 ML estimation of CFO; Kay's paper on freq. est. of tone
             for pp = 1:P-1
                 CFO_hat(pp) = angle(sig_tone(pp+1).*conj(sig_tone(pp)));
             end
-            CFO_est = mean(CFO_hat);
+            CFO_est = sum(CFO_hat)/(P-1);
+            
+            % Method2 ML estimation of CFO; Kay's paper on freq. est. of tone
+            for pp = 1:P-1
+                CFO_hat(pp) = sig_tone(pp+1).*conj(sig_tone(pp));
+            end
+            CFO_est = angle(sum(CFO_hat)/(P-1));
+            CFO_est = 0;
+            
+            % Use the ML CFO to evaluate efficacy of delay candidate
             CFO_est1 = angle(mean(exp(1j*CFO_hat)));
-%             CFO_est = eF;
+%             CFO_est = eF; % For debug; plug-in true CFO
             sig_deCFO = sig_ave.*exp(-1j*CFO_est*(0:P-1).');
             score(tt) = abs(sum(sig_deCFO.*conj(delay_mtx(:,tt)))/norm(delay_mtx(:,tt))^2);
         end
+        
+        % Plug-in Matching Pursuit index for CFO and Delay est.
         [maxscore,maxindex] = max(score);
         maxindex_est(ss,MCindex) = maxindex;
         delay_est(ss,MCindex) = delay_cand(maxindex);
         
-        % Finding angle
+        % watch score to debug
+%         figure;plot(delay_cand/2/pi*Ts/1e-9,score)
+        
+        % ---------------   AoA/AoD Estimation   ----------------
         sig_desymb = zeros(M,1);
+        
+        % Evaluate average sample over each SS burst
         for mm=1:M
             indextemp = (mm-1)*P+1:mm*P;
             sig_desymb(mm) = mean(sig_noisy(indextemp).*(conj(delay_mtx(:,maxindex))...
                 ./abs(delay_mtx(:,maxindex)))).';
         end
         
+        % Use true CFO (for debug)
         if to_est_CFO==0
             phase_error_mat = exp(1j*eF*Nb*(0:M-1).');
             phase_error = phase_error_mat;
         end
         
+        % Matching pursuit for all AoA/AoD pair in dictionary
         for dd=1:dict_num
-            if MCindex==26 & dd==3691
-                apple=1;
-            end
+            
+            % Debug flag, used by seting AoA=AoD = 0
+%             if MCindex==26 & dd==3691
+%                 apple=1;
+%             end
             
 %             sig_cand = zeros(P*M,1);
 %             for mm=1:M
@@ -226,19 +268,60 @@ for MCindex = 1:MCtimes
                 % adjust N/A numbers
                 sig_burst(isnan(sig_burst))=0;
                 
-                % Estimation of CFO for adjacent bursts
-                CFO_hat_new = zeros(M-1,1);
+%                 %  ---------  Quasi-ML Method 1  ---------
+%                 CFO_hat_new1 = zeros(M-1,1);
+%                 for mm=1:M-1
+%                     if CFO_select(mm,dd)
+%                     CFO_hat_new1(mm) = angle(sig_burst(mm+1).*conj(sig_burst(mm)));
+%                     end
+%                 end
+%                 CFO_est = sum(CFO_hat_new1)/sum(CFO_select(:,dd))/Nb;
+
+%                 
+                %  ---------  Quasi ML Method 2  ---------
+                CFO_hat_new2 = zeros(M-1,1);
                 for mm=1:M-1
                     if CFO_select(mm,dd)
-                    CFO_hat_new(mm) = angle(sig_burst(mm+1).*conj(sig_burst(mm)));
+                        CFO_hat_new2(mm) = sig_burst(mm+1).*conj(sig_burst(mm));
                     end
                 end
+                CFO_est = angle(sum(CFO_hat_new2(CFO_select(:,dd))./abs(CFO_hat_new2(CFO_select(:,dd))))/sum(CFO_select(:,dd)))/Nb;
                 
-                CFO_est = sum(CFO_hat_new)/sum(CFO_select(:,dd))/512;
+                % It seems refine CFO is necessary at beginning
+                if refine_CFO
+                    CFO_range = linspace(CFO_est*0.7,CFO_est*1.4,10);
+                    score_CFO = zeros(10,1);
+                for zz=1:10
+%                     CFO_estold = CFO_est;
+%                     phase_error_mat = exp(1j*CFO_estold*Nb*(0:M-1).');
+%                     x_vec_CFO = Measure_mat_new(:,dd).*phase_error_mat;
+%                     y_vec_CFO = sig_desymb;
+%                     opt_alpha = 1;
+%                     error_CFO_est =  y_vec_CFO - opt_alpha*x_vec_CFO;
+%                     sig_deF = Measure_mat_new(:,dd).*(1j*(Nb*(0:M-1).').*exp(1j*CFO_estold*Nb*(0:M-1).'));           
+%                     Q_cal = [real(sig_deF);imag(sig_deF)];
+%                     tr = [real(error_CFO_est);imag(error_CFO_est)];
+%                     deF = pinv(Q_cal) * tr;
+%                     CFO_est = CFO_estold + deF;
+                    phase_est_test = exp(1j*CFO_range(zz)*Nb*(0:M-1).');
+                    score_CFO(zz) = abs(sig_desymb'*(Measure_mat_new(:,dd).* phase_est_test));
+%                     phase_error_mat = exp(1j*CFO_estold*Nb*(0:M-1).');
+                end
+                [~,CFO_index] = max(score_CFO);
+                CFO_est = CFO_range(CFO_index);
+                end
+
+                % ----- true CFO (for debug) ---------
+%                 CFO_est = eF;
                 
-                % simpler approach of estimating CFO
+                %  --------- Simpler approach of estimating CFO  (no good)---------
 %                 CFO_est = angle(sum(sig_burst(find(CFO_select(:,dd)+1)))...
-%                     *conj(sum(sig_burst(find(CFO_select(:,dd))))))/512;
+%                     *conj(sum(sig_burst(find(CFO_select(:,dd))))))/Nb;
+
+                %  --------- simpler approach 2 (no good) ---------
+%                 pad = 511;
+%                 x_temp = sig_burst.*conj(Measure_mat_new(:,dd));
+%                 CFO_est = max(abs(fft([x_temp;zeros(pad*M,1)])))*(2*pi)/((pad+1)*Nb);
                 
                 phase_error_mat = exp(1j*CFO_est*Nb*(0:M-1).');
                 phase_error = phase_error_mat;
@@ -248,13 +331,46 @@ for MCindex = 1:MCtimes
                 /(Measure_mat_new(:,dd)'*Measure_mat_new(:,dd));
         end
         [~,bestindex_comp(MCindex)] = max(abs(score_final));
+        
+%         bestindex_comp(MCindex) = index_true;% debug. comment in main script
         bestrow = floor((bestindex_comp(MCindex)-1)/cand_num_r)+1;
         bestcol = bestindex_comp(MCindex)-(bestrow-1)*cand_num_r;
         bestAOA(MCindex,ss) = (bestcol-1)*AOAstep-60*pi/180;
         bestAOD(MCindex,ss) = (bestrow-1)*AODstep-60*pi/180;
         
+        % Plot score for debug
+        if debug_flag
+            figure;plot(abs(score_final));hold on;plot(index_true,abs(score_final(index_true)),'o','linewidth',2,'markersize',10);
+            grid on
+            legend('scores','true AoA/AoD pair')
+            
+            CFO_est_range = linspace(0.0010,0.0020,200);
+            for xx=1:200
+                CFO_est = CFO_est_range(xx) ;
+            phase_error_mat = exp(1j*CFO_est*Nb*(0:M-1).');
+%             phase_error_mat = exp(1j*eF*Nb*(0:M-1).');
+            phase_error = phase_error_mat;
+            score_test_CFO(xx) = abs(sig_desymb'*(Measure_mat_new(:,dd).*phase_error));
+            end
+            figure
+            plot(CFO_est_range,score_test_CFO)
+
+        end
+        
+%         if debug_flag
+%             figure;
+%             subplot(211)
+%             plot(CFO_hat_new1(CFO_select(:,dd))/Nb/eF)
+%             title('single sample pair angle est')
+%             grid on
+%             subplot(212);
+%             plot(abs(CFO_hat_new2(CFO_select(:,dd))))
+%             title('sample mag')
+%             grid on
+%         end
+        
         % -------- Refinement to improve accuracy ----------------
-        max_ite_num = 1e3;
+        
         ii = 0;
         phi_hat = zeros(max_ite_num+1,1);
         theta_hat = zeros(max_ite_num+1,1);
@@ -263,8 +379,8 @@ for MCindex = 1:MCtimes
         
         phi_hat(1) = bestAOA(MCindex,ss);
         theta_hat(1)= bestAOD(MCindex,ss);
-        eF_hat(1) = CFO_final(bestindex_comp(MCindex));
-        stop_sign = 0;
+        eF_hat(1) = (CFO_final(bestindex_comp(MCindex))*Nb+2*pi)/Nb;
+        stop_sign = 1;
         while stop_sign==0
             ii = ii + 1;
             %---------------------------------------------
@@ -350,9 +466,13 @@ for MCindex = 1:MCtimes
             theta_hat(ii+1) = theta_hat(ii) + dtheta;
 
         end
-        theta_last = theta_hat(ii-1);
-        phi_last = phi_hat(ii-1);
-        eF_last = eF_hat(ii-1);
+%         theta_last = theta_hat(ii-1); %theta_hat(1); %
+%         phi_last = phi_hat(ii-1); %phi_hat(1);
+%         eF_last = eF_hat(ii-1); %eF_hat(1);
+        
+        theta_last = theta_hat(1); %
+        phi_last = phi_hat(1);
+        eF_last = eF_hat(1);
         
         AOA_error_nocomp(MCindex,ss) = abs(phi_last - phi0(MCindex));
         AOD_error_nocomp(MCindex,ss) = abs(theta_last - theta0(MCindex));
@@ -370,28 +490,43 @@ end
 for ss=1:SNR_num
 AOAalign_comp_mean(ss) = sum((AOA_error_nocomp(:,ss)/pi*180)<(105/Nr),1)/MCtimes;
 AODalign_comp_mean(ss) = sum((AOD_error_nocomp(:,ss)/pi*180)<(105/Nt),1)/MCtimes;
+Align_comp_mean(ss) = sum(((AOD_error_nocomp(:,ss)/pi*180)<(105/Nt)&...
+                           (AOA_error_nocomp(:,ss)/pi*180)<(105/Nr)),1)/MCtimes;
+
 end
 
 figure
-plot(SNR_range,AOAalign_comp_mean,'--','linewidth',2);hold on
-plot(SNR_range,AODalign_comp_mean,'--','linewidth',2);hold on
+% plot(SNR_range,AOAalign_comp_mean,'--','linewidth',2);hold on
+% plot(SNR_range,AODalign_comp_mean,'--','linewidth',2);hold on
+
+semilogy(SNR_range,1-AOAalign_comp_mean,'-','linewidth',2);hold on
+semilogy(SNR_range,1-AODalign_comp_mean,'-','linewidth',2);hold on
+semilogy(SNR_range,1-Align_comp_mean,'-','linewidth',2);hold on
 
 grid on
 xlabel('SNR (dB)')
-ylabel('Alignment Prob')
+ylabel('Misalignment Rate')
+legend('AoA','AoD','Alignment')
 %% RMSE evaluation
-portion = 0.90;
+portion = 1; % for debug 
 for ss=1:SNR_num
     delay_error = abs(delay_est(ss,:)-tau_samp).^2;
     RMSE_delay(ss) = sqrt(mean(get_portion(delay_error,portion)))*(Ts/(2*pi)/1e-9);
+%     RMSE_delay(ss) = sqrt(mean((delay_error)))*(Ts/(2*pi)/1e-9);
+
     
     input_sig = abs(CFO_error(:,ss)).^2;
     RMSE_CFO(ss) = sqrt(mean(get_portion(input_sig,portion)))*(1/Ts/2/pi);
+%     RMSE_CFO(ss) = sqrt(mean((input_sig)))*(1/Ts/2/pi);
+
     
     input_sig = abs(AOD_error_nocomp(:,ss)).^2;
     RMSE_theta(ss) = sqrt(mean(get_portion(input_sig,portion)))*(1/pi*180);
+%     RMSE_theta(ss) = sqrt(mean((input_sig)))*(1/pi*180);
+
     
     input_sig = abs(AOA_error_nocomp(:,ss)).^2;
+%     RMSE_phi(ss) = sqrt(mean((input_sig)))*(1/pi*180);
     RMSE_phi(ss) = sqrt(mean(get_portion(input_sig,portion)))*(1/pi*180);
 end
 figure
@@ -417,6 +552,30 @@ xlabel('Point-to-Point SNR [dB]')
 ylabel('RMSE of AoA/AoD [deg]')
 title('angle est')
 
+%%
+for ss=1:length(SNR_range)
+    for MCindex = 1:MCtimes
+        AOA_error_nofine(MCindex,ss) = abs(bestAOA(MCindex,ss) - phi0(MCindex));
+        AOD_error_nofine(MCindex,ss) = abs(bestAOD(MCindex,ss) - theta0(MCindex));
+    end
+        
+        input_sig = abs(AOD_error_nofine(:,ss)).^2;
+        RMSE_theta_nofine(ss) = sqrt(mean(get_portion(input_sig,portion)))*(1/pi*180);
+%     RMSE_theta(ss) = sqrt(mean((input_sig)))*(1/pi*180);
+
+    
+        input_sig = abs(AOA_error_nofine(:,ss)).^2;
+%     RMSE_phi(ss) = sqrt(mean((input_sig)))*(1/pi*180);
+        RMSE_phi_nofine(ss) = sqrt(mean(get_portion(input_sig,portion)))*(1/pi*180);
+end
+
+figure
+semilogy(SNR_range,RMSE_theta_nofine);hold on
+semilogy(SNR_range,RMSE_phi_nofine);hold on
+grid on
+xlabel('SNR [dB]')
+ylabel('RMSE of AoA/AoD [deg]')
+title('angle est w/o refinement')
 
 %% Plot CRLB of angle est./tracking
 % figure
