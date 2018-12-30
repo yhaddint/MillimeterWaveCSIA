@@ -17,17 +17,17 @@ TRN_length = 127;
 M = 64;
 MCS = 15;
 sample_num = TRN_length*M;
-N_t = 64;
-N_r = 16;
+Nt = 32;
+Nr = 8;
 SNR_num = 2;
 SNR_range = linspace(10,20,SNR_num);
 
 %% dictionary generation
 
-cand_num_r = 61;
-cand_num_t = 121;
+cand_num_r = 9;
+cand_num_t = 33;
 GtGr = cand_num_r*cand_num_t;
-NtNr = N_t*N_r;
+NtNr = Nt*Nr;
 
 cand_y = zeros(M,cand_num_r*cand_num_t);
 cand_angle_r = linspace(-pi*60/180,pi*60/180,cand_num_r);
@@ -35,17 +35,17 @@ AOAstep = cand_angle_r(2)-cand_angle_r(1);
 cand_angle_t = linspace(-pi*60/180,pi*60/180,cand_num_t);
 AODstep = cand_angle_t(2)-cand_angle_t(1);
 
-cand_ARV_r = exp(1j*(0:N_r-1)'*pi*sin(cand_angle_r));
-cand_ARV_t = exp(1j*(0:N_t-1)'*pi*sin(cand_angle_t));
+cand_ARV_r = exp(1j*(0:Nr-1)'*pi*sin(cand_angle_r));
+cand_ARV_t = exp(1j*(0:Nt-1)'*pi*sin(cand_angle_t));
 
 %% MC simulations
 
 for runindex=1:runtimes
+    clc;fprintf('Ite %d out of %d\n',runindex,runtimes);
     if mod(runindex,10)==1
-        clc;fprintf('Ite %d out of %d\n',runindex,runtimes);
         % dictionary generation
-        steer_vec_tx = ((randi(2,N_t,M)*2-3)+1j*(randi(2,N_t,M)*2-3))/sqrt(2*N_t);
-        steer_vec_rx = ((randi(2,N_r,M)*2-3)+1j*(randi(2,N_r,M)*2-3))/sqrt(2*N_r);
+        steer_vec_tx = ((randi(2,Nt,M)*2-3)+1j*(randi(2,Nt,M)*2-3))/sqrt(2*Nt);
+        steer_vec_rx = ((randi(2,Nr,M)*2-3)+1j*(randi(2,Nr,M)*2-3))/sqrt(2*Nr);
         Atot_temp = kron(transpose(steer_vec_tx),steer_vec_rx');
         select_row = zeros(1,M);
         for ii=1:M
@@ -53,7 +53,7 @@ for runindex=1:runtimes
         end
         Atot = Atot_temp(select_row,:);
         ACS = (randn(MCS,NtNr) + 1j*randn(MCS,NtNr))*sqrt(1/2/NtNr);
-        APR = Atot* (ACS'*inv(ACS*ACS'));
+%         APR = Atot* (ACS'*inv(ACS*ACS'));
 %         for bb=1:64
 %             A = ACS';
 %             B = Atot';
@@ -64,7 +64,7 @@ for runindex=1:runtimes
 %         APR = X';
         
         APR = (randn(M,MCS) + 1j*randn(M,MCS))*sqrt(1/2/MCS);
-        Atot = APR*ACS;
+        Atot_decomp = APR*ACS;
         
         new_dict = kron(conj(cand_ARV_t),cand_ARV_r); 
         
@@ -82,6 +82,12 @@ for runindex=1:runtimes
         
         
     end
+    
+    % Find True AoA/AoD in grid (for debug)
+    [~,row_true] = min(abs(cand_angle_r - 0));
+    [~,col_true] = min(abs(cand_angle_t - 0));
+    index_true = (col_true-1)*cand_num_r + row_true;
+    
 %     % generate AOA/AOD and g_m
 %     AOD(runindex) = 0;%(rand*120-60)/180*pi;
 %     angle_response_tx = transpose(exp(1j*(0:N_t-1)*pi*sin(AOD(runindex))));
@@ -125,7 +131,7 @@ for runindex=1:runtimes
     for SNRindex = 1:SNR_num
         
         noise_pow = 10^(-SNR_range(SNRindex)/10);
-        y = APR * (ACS*new_dict(:,3691));% + noise_normal*sqrt(noise_pow);
+        y = APR * (ACS*new_dict(:,3691)) + noise_normal*sqrt(noise_pow);
 %         r_noisy = sig_received.'+noise_normal*sqrt(noise_pow);
 %         r_noisy_debug = sig_received_debug.'+noise_normal*sqrt(noise_pow);
 %         
@@ -163,7 +169,7 @@ for runindex=1:runtimes
 %                 end
 %             end
 %         end
-        cvx_begin sdp
+        cvx_begin sdp quiet
             variable Z(MCS,MCS) hermitian semidefinite 
             minimize( trace(Z) )
             subject to
@@ -172,7 +178,7 @@ for runindex=1:runtimes
         
         z_new = (ACS*new_dict(:,3691));
         Z_new = z_new*z_new';
-        norm(diag(APR * Z_new * APR') - d_vec)
+        norm(diag(APR * Z_new * APR') - d_vec);
         
         [Umat,Sigma,Vmat] = svd(Z);
         alpha = pinv(Vmat(:,1))*z_new;
@@ -196,8 +202,8 @@ end
 %%
 % AOAalign_mag_mean = sum((AOA_error_mag/pi*180)<(105/N_r),1)/runtimes;
 % AODalign_mag_mean = sum((AOD_error_mag/pi*180)<(105/N_t),1)/runtimes;
-AOAalign_nocomp_mean = sum((AOA_error_nocomp/pi*180)<(105/N_r),1)/runtimes;
-AODalign_nocomp_mean = sum((AOD_error_nocomp/pi*180)<(105/N_t),1)/runtimes;
+AOAalign_nocomp_mean = sum((AOA_error_nocomp/pi*180)<(105/Nr),1)/runtimes;
+AODalign_nocomp_mean = sum((AOD_error_nocomp/pi*180)<(105/Nt),1)/runtimes;
 figure
 plot(SNR_range,AOAalign_nocomp_mean,'-','linewidth',2);hold on
 plot(SNR_range,AODalign_nocomp_mean,'-','linewidth',2);hold on
@@ -218,7 +224,7 @@ grid on
 xlabel('Estimation Error [deg]')
 ylabel('CDF')
 legend('AoD, complex alg','AoD, mag alg')
-xlim([0,105*8/N_t])
+xlim([0,105*8/Nt])
 
 subplot(212)
 [b,a] = ecdf(AOA_error_nocomp(:,5)/pi*180);
@@ -228,5 +234,5 @@ plot(a,b);hold on
 grid on
 xlabel('Estimation Error [deg]')
 ylabel('CDF')
-xlim([0,105*8/N_r])
+xlim([0,105*8/Nr])
 legend('AoA, complex alg','AoA, mag alg')
