@@ -26,8 +26,8 @@ AOAspread2 = 0;                             % Intra-cluster AoA spread square
 AOAspread = 0;                              % Intra-cluster AoA spread RMS 
 AODspread2 = 0;                             % Intra-cluster AoD spread RMS 
 AODspread = 0;                              % Intra-cluster AoD spread RMS 
-SNR_num = 4;                               % Num of Monte Carlo Sim.
-SNR_range = linspace(-30,0,SNR_num);
+SNR_num = 1;                               % Num of Monte Carlo Sim.
+SNR_range = linspace(30,30,SNR_num);
 BW = 57.6e6;                                % IA bandiwdth [Hz]
 Ts = 1/BW;                                  % Sample duration
 Nb = 512;                                   % Sample per SS burst
@@ -40,6 +40,8 @@ to_est_CFO = 1;                             % Assuming perfect knowledge of CFO 
 max_ite_num = 1e3;                          % Number iteration in refinement steps
 refine_CFO = 1;                             % Turn on refine CFO when coarse estimation of AoA/AoD (long long time!!!)
 
+az_lim = pi/3;
+el_lim = pi/6;
 
 %-------------------------------------
 % Phase Noise Specification
@@ -64,13 +66,13 @@ dict_num = cand_num_r_az * cand_num_r_el * cand_num_t_az * cand_num_t_el;
 
 cand_y = zeros(M, dict_num);
 
-cand_angle_r_az = linspace(-pi*60/180,pi*60/180,cand_num_r_az);
+cand_angle_r_az = linspace(-az_lim, az_lim, cand_num_r_az);
 AOAstep_az = cand_angle_r_az(2)-cand_angle_r_az(1);
 
-cand_angle_t_el = linspace(-pi*30/180,pi*30/180,cand_num_t_el);
+cand_angle_t_el = linspace(-el_lim, el_lim, cand_num_t_el);
 AODstep_el = cand_angle_t_el(2)-cand_angle_t_el(1);
 
-cand_angle_t_az = linspace(-pi*60/180,pi*60/180,cand_num_t_az);
+cand_angle_t_az = linspace(-az_lim, az_lim, cand_num_t_az);
 AODstep_az = cand_angle_t_az(2)-cand_angle_t_az(1);
 
 cand_ARV_r_az = exp(1j*(0:Nr_az-1)'*pi*sin(cand_angle_r_az));
@@ -87,6 +89,24 @@ phase_error_mat = kron(exp(1j*eF*Nb*(0:M-1)),exp(1j*eF*(0:P-1)'));
 phase_error = reshape(phase_error_mat,M*P,1);
 
 
+% ------- Precompute codebook for Sector Search -------------
+% number of sector beams in steering
+M_BS_burst_az = 8;
+M_BS_burst_el = 2;
+M_UE_burst_az = 4;
+
+% angle grid for sector beams; sector approach gives estimator from grid
+BS_az_grid = (az_lim)*linspace(-1+(1/M_BS_burst_az),1-(1/M_BS_burst_az),M_BS_burst_az);
+BS_el_grid = (el_lim)*linspace(-1+(1/M_BS_burst_el),1-(1/M_BS_burst_el),M_BS_burst_el);
+UE_az_grid = (az_lim)*linspace(-1+(1/M_UE_burst_az),1-(1/M_UE_burst_az),M_UE_burst_az);
+
+% codebook for sector IA approach
+W_sec_mat = get_IA_BF(Nr_az, M_UE_burst_az, 'sector_FSM_KW'); % Rx BF in IA stage
+F_sec_mat = get_IA_BF_3D(Nt_az, Nt_el,...
+                     M_BS_burst_az, M_BS_burst_el,...
+                     'sector_FSM_KW', az_lim, el_lim); % Tx beamformer in IA stage
+
+
 % ---- signal length parameters --------
 ZC_root = 29; % ZC root, a coprime number with ZC length
 ZC_N = 127; % ZC sequence length
@@ -99,7 +119,8 @@ for MCidx = 1:MCtimes
     
     clc
     fprintf('iteration %d:\n',MCidx);
-    
+
+    % ------- Compressive Approach -------------
 %     debug_flag = 0;
 %     if MCindex==1
 %         debug_flag = 1;
@@ -137,15 +158,15 @@ for MCidx = 1:MCtimes
 
     % AoA of rays with disired seperation
     phi_az = zeros(path_num,1);
-    phi0_az(MCidx) = 0;%(rand*90-45)/180*pi;
+    phi0_az(MCidx) = 0.2618;%(rand*90-45)/180*pi;
     phi_az = phi0_az(MCidx) + randn(path_num,1) * AOAspread;
 
     % AoD of rays with disired seperation
     theta_az = zeros(path_num,1);
     theta_el = zeros(path_num,1);
 
-    theta0_az(MCidx) = 0;%(rand*90-45)/180*pi;
-    theta0_el(MCidx) = 0;%(rand*30-15)/180*pi;
+    theta0_az(MCidx) = 0.1309;%(rand*90-45)/180*pi;
+    theta0_el(MCidx) = 0.2618;%(rand*30-15)/180*pi;
 
     theta_az = theta0_az(MCidx) + randn(path_num,1) * AODspread;
     theta_el = theta0_el(MCidx) + randn(path_num,1) * AOAspread;
@@ -225,7 +246,7 @@ for MCidx = 1:MCtimes
     end
     
 
-    sig_rx = zeros(P*M,1);
+    sig_rx = zeros(P*M, 1);
     for ll=1:path_num
         for mm=1:M
             index = (mm-1)*P+1:mm*P;
@@ -237,12 +258,49 @@ for MCidx = 1:MCtimes
     
     awgn = (randn(P*M,1)+1j*randn(P*M,1))/sqrt(2);
     
+    % ------- Precompute for Sector Search -------------
+    sig_rx_sec = zeros(P*M, 1);
+    for ll=1:path_num
+        for mm=1:M
+            
+            mm_BS = floor((mm-1)/M_UE_burst_az)+1;
+            mm_UE = mm - (mm_BS-1)*M_UE_burst_az;
+            
+            index = (mm-1)*P+1:mm*P;
+            indexPN = (mm-1)*Nb+1:(mm-1)*Nb+P;
+            sig_rx_sec(index) = (g_ray(ll) * (W_sec_mat(:,mm_UE)'*arx(:,ll)) * conj(F_sec_mat(:,mm_BS)'*atx(:,ll))...
+                *(diag(qvec)*DFT'*(fvec.*symb)) * exp(1j*Nb*(mm-1)*eF)).*PN_seq(indexPN);
+        end
+    end
+
+    
     % ------------- For loop for Various SNR ----------------------
     for ss = 1:SNR_num
         
         % SNR and Adding AWGN to Rx Signal
         sigman2 = 10^(-SNR_range(ss)/10);
         sig_noisy = sig_rx + awgn * sqrt(sigman2);
+        
+        % -------- Sector Approach -------
+        sig_sec_ave = mean(abs(reshape(sig_rx_sec + awgn * sqrt(sigman2), P, M)).^2,1);
+        [~,best_sec_idx] = max(sig_sec_ave);
+        
+        % Use SS burst index to get sector index in UE, BS_az, and BS_el
+        best_sec_BS_idx = floor((best_sec_idx-1)/M_UE_burst_az)+1;
+        best_sec_UE_idx = best_sec_idx - (best_sec_BS_idx-1)*M_UE_burst_az;
+        best_sec_BS_el_idx = floor((best_sec_BS_idx-1)/M_BS_burst_az)+1;
+        best_sec_BS_az_idx = best_sec_BS_idx - (best_sec_BS_el_idx-1)*M_BS_burst_az;
+        
+        % use sector index to get propagation angle etimation
+        sec_UE_az_est = UE_az_grid(best_sec_UE_idx);
+        sec_BS_az_est = BS_az_grid(best_sec_BS_az_idx);
+        sec_BS_el_est = BS_el_grid(best_sec_BS_el_idx);
+        
+        % Error Evaluation
+        AOA_az_error_sec(MCidx,ss) = abs(sec_UE_az_est - phi0_az(MCidx));
+        AOD_az_error_sec(MCidx,ss) = abs(sec_BS_az_est - theta0_az(MCidx));
+        AOD_el_error_sec(MCidx,ss) = abs(sec_BS_el_est - theta0_el(MCidx));
+        
         
         % -------- CFO Estimation and Delay Matching Pursuit ------------
         sig_ave = mean(reshape(sig_noisy,P,M),2);
@@ -539,7 +597,6 @@ for MCidx = 1:MCtimes
         eF_last = eF_hat(1);
         
         AOA_az_error_comp(MCidx,ss) = abs(phi_az_last - phi0_az(MCidx));
-        
         AOD_az_error_comp(MCidx,ss) = abs(theta_az_last - theta0_az(MCidx));
         AOD_el_error_comp(MCidx,ss) = abs(theta_el_last - theta0_el(MCidx));
         
