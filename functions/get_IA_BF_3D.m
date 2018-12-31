@@ -65,8 +65,8 @@ function [ BF0 ] = get_IA_BF_3D( N_az, N_el, M_az, M_el, type, az_lim, el_lim)
             
             % planar part
             for mm = 1:M_az*M_el
-                mm_az = floor((mm-1)/M_el)+1;
-                mm_el = mm - (mm_az-1)*M_el;
+                mm_el = floor((mm-1)/M_az)+1;
+                mm_az = mm - (mm_el-1)*M_az;
                 BF_temp(:,mm) = kron( BF_el(:,mm_el), BF_az(:,mm_az));
                 BF(:,mm) = BF_temp(:,mm)./norm(BF_temp(:,mm));
             end
