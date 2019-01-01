@@ -41,8 +41,11 @@ to_est_CFO = 1;                             % Assuming perfect knowledge of CFO 
 max_ite_num = 1e3;                          % Number iteration in refinement steps
 refine_CFO = 1;                             % Turn on refine CFO when coarse estimation of AoA/AoD (long long time!!!)
 
-az_lim = pi/3;
-el_lim = pi/6;
+Nc = 4;                                     % maximum multipath delay in [samples]
+STO_max = 500;                             % range of maximum integer offset
+
+az_lim = pi/3;                              % Az. range limit (by default -60 to 60 deg)
+el_lim = pi/6;                              % El. range limit (by default -30 to 30 deg)
 
 CP = 8;                                     % cyclic prefix in [samples]
 OFDM_sym_num = 4;                           % Num of OFDM in each burst
@@ -265,7 +268,7 @@ for MCidx = 1:MCtimes
     
     awgn = (randn(P*M,1)+1j*randn(P*M,1))/sqrt(2);
     
-    % ------- Precompute for Sector Search -------------
+    % ------- Precompute for Sector Search (assuming ideal detection) -------------
     sig_rx_sec = zeros(P*M, 1);
     for ll=1:path_num
         for mm=1:M
@@ -288,7 +291,11 @@ for MCidx = 1:MCtimes
     Rx_sig_length = burst_N * M + ZC_N - 1 + STO; % signal length after ZC correlation;
 
     
-    
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    %
+    %     Sector approach
+    %
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     for path_index = 1:path_num
         % ------- Channel Generation --------
         H_chan = get_H_NB_3D(g_ray(path_index),...
@@ -300,14 +307,14 @@ for MCidx = 1:MCtimes
                              Nt_az, Nt_el, Nr);     % Generate discrete time domain frequency-flat channel
         H_chan0 = H_chan./norm(H_chan,'fro')*sqrt(Nt*Nr/path_num); % H per multipath
 
-        % ----- received signal generation ------
+        % ----- sector version received signal generation ------
         precoder_index_old = 0;
         combiner_index_old = 0;
         for nn=1:Tx_sig_length
-  
-            precoder_index = floor( (nn-1) / (burst_length*M_burst(2)) )+1;
-            combiner_index_raw = floor( (nn + STO - 1) / burst_length )+1;
-            combiner_index = mod(combiner_index_raw-1,M_burst(2))+1;
+
+                precoder_index = floor( (nn-1) / (burst_length*M_burst(2)) )+1;
+                combiner_index_raw = floor( (nn + STO - 1) / burst_length )+1;
+                combiner_index = mod(combiner_index_raw-1,M_burst(2))+1;
 
             if (precoder_index ~= precoder_index_old) || (combiner_index ~= combiner_index_old)
     %             fprintf('precoder index %d, ',precoder_index);
@@ -322,16 +329,66 @@ for MCidx = 1:MCtimes
             g_save_debug(nn) = g_effective;
 %             Rx_sig0(nn,path_index) = g_effective * Tx_sig(nn);
         end % end of sample sweeping
-        Rx_sig0(:,path_index) = g_save_debug.' .* Tx_sig_CP;
+        Rx_sig0_sec(:,path_index) = g_save_debug.' .* Tx_sig_CP;
     end
     
     % ----- summation over all delay tap for freq selective sim --------
-    Rx_sig = zeros(burst_length*M,1);
+    Rx_sig_sec = zeros(burst_length*M,1);
     for path_index = 1:path_num
         timewindow0 = (1+pathdelay(path_index)):burst_length*M;
         timewindow1 = 1:(burst_length*M-pathdelay(path_index));
-        Rx_sig(timewindow0,1) = Rx_sig(timewindow0,1) + Rx_sig0(timewindow1,path_index);
+        Rx_sig_sec(timewindow0,1) = Rx_sig_sec(timewindow0,1) + Rx_sig0_sec(timewindow1,path_index);
     end
+    
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    %
+    %     PN approach
+    %
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    Nc_acc_mtx = toeplitz([1,zeros(1,burst_length-Nc)]',[ones(1,Nc),zeros(1,burst_length-Nc)]);
+    for path_index = 1:path_num
+        % ------- Channel Generation --------
+        H_chan = get_H_NB_3D(g_ray(path_index),...
+                             phi_az(path_index),...
+                             theta_az(path_index),...
+                             theta_el(path_index),...
+                             1,...                  % cluster number
+                             1,...                  % ray number
+                             Nt_az, Nt_el, Nr);     % Generate discrete time domain frequency-flat channel
+        H_chan0 = H_chan./norm(H_chan,'fro')*sqrt(Nt*Nr/path_num); % H per multipath
+
+        % ----- sector version received signal generation ------
+        precoder_index_old = 0;
+        combiner_index_old = 0;
+        for nn=1:Tx_sig_length
+
+            precoder_index = floor( (nn-1) / burst_length )+1;
+            combiner_index_raw = floor( (nn + STO - 1) / burst_length )+1;
+            combiner_index = mod(combiner_index_raw-1,M)+1;
+
+            if (precoder_index ~= precoder_index_old) || (combiner_index ~= combiner_index_old)
+
+                w_vec = W(:,combiner_index);
+                v_vec = F(:,precoder_index);
+                g_effective = (w_vec'*H_chan0*v_vec);
+                precoder_index_old = precoder_index;
+                combiner_index_old = combiner_index;
+            end
+%             index_debug(:,nn) = [precoder_index;combiner_index];
+            g_save_debug(nn) = g_effective;
+%             Rx_sig0(nn,path_index) = g_effective * Tx_sig(nn);
+        end % end of sample sweeping
+        Rx_sig0_PN(:,path_index) = g_save_debug.' .* Tx_sig_CP;
+    end
+    
+    % ----- summation over all delay tap for freq selective sim --------
+    Rx_sig_PN = zeros(burst_length*M,1);
+    for path_index = 1:path_num
+        timewindow0 = (1+pathdelay(path_index)):burst_length*M;
+        timewindow1 = 1:(burst_length*M-pathdelay(path_index));
+        Rx_sig_PN(timewindow0,1) = Rx_sig_PN(timewindow0,1) + Rx_sig0_sec(timewindow1,path_index);
+    end
+    
     
     % ------- AWGN -------
     noise_CP = (randn(Tx_sig_length,1)+1j*randn(Tx_sig_length,1))/sqrt(2);
@@ -342,12 +399,20 @@ for MCidx = 1:MCtimes
     corr_out_H1 = zeros(Rx_sig_length + burst_N - ZC_N + 1, 1); % pad a zero at the end
     corr_out_H0 = zeros(Rx_sig_length + burst_N - ZC_N + 1,1); % pad a zero at the end
     
-    % ----- For loop for SNR (detection part) -----
+    % ----- For loop for SNR (Both BF Approach; In Detection) -----
+    BFtype = 'PN';
     for ss = 1:SNR_num
         noise_pow = 10^(-SNR_range(ss)/10);
         awgn_CP = noise_CP * sqrt(noise_pow);
-        Rx_sig_H1 = Rx_sig.*exp(1j*CFO_samp*(0:length(Rx_sig)-1).') + awgn_CP ;
-        Rx_sig_H0 = awgn_CP;
+        switch BFtype
+            case 'sector'
+                Rx_sig_H1 = Rx_sig_sec.*exp(1j*CFO_samp*(0:length(Rx_sig_sec)-1).') + awgn_CP ;
+                Rx_sig_H0 = awgn_CP;
+            case 'PN'
+                Rx_sig_H1 = Rx_sig_PN.*exp(1j*CFO_samp*(0:length(Rx_sig_PN)-1).') + awgn_CP ;
+                Rx_sig_H0 = awgn_CP;
+                
+        end
 
         % ------ T Domain ZC Correlation -------
 
@@ -357,7 +422,7 @@ for MCidx = 1:MCtimes
         corr_out_H0_STO = abs(conv(ZC_t_domain,Rx_sig_H0_wSTO)/ZC_N).^2; % corr rx t-domain sig with ZC
 
 
-        BFtype = 'sector';
+        
         switch BFtype
             
             % ----- Multi-Peak Detection ---------
@@ -389,7 +454,7 @@ for MCidx = 1:MCtimes
     end % end of SNR sweeping
     
     
-    % ------------- For loop for Various SNR ----------------------
+    % ------------- For loop for Various SNR (Beam Training part)----------------------
     for ss = 1:SNR_num
         
         % SNR and Adding AWGN to Rx Signal
