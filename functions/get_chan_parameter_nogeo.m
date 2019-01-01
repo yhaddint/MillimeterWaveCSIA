@@ -50,7 +50,7 @@ rayAOD = zeros(ray_num, cluster_num);
 for cluster_index = 1:cluster_num
 
     % Randomly generate chan. parameters (AOD in Azimuth)
-    if centroid_AOD == 'random'
+    if strcmp(centroid_AOD, 'random')
         ray_AOD_azim_mean = rand * 2 * pi / 3 - pi/3;
     else
         ray_AOD_azim_mean = centroid_AOD(cluster_index);
@@ -65,7 +65,7 @@ for cluster_index = 1:cluster_num
 %     ray_AOD_elev(cluster_index,:) = ray_AOD_elev_mean + angle_spread;
 
     % Randomly generate chan. parameters (AOA in Azimuth)
-    if centroid_AOA == 'random'
+    if strcmp(centroid_AOA, 'random')
         ray_AOA_azim_mean = rand * 2 * pi / 3 - pi/3;
     else
         ray_AOA_azim_mean = centroid_AOA(cluster_index);
