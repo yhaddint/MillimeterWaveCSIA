@@ -164,8 +164,8 @@ for kk = 1:angle_num
 end
 
 for kk=1:angle_num^2
-    kk_az = floor((kk-1)/angle_num)+1;
-    kk_el = kk - (kk_az-1)*angle_num;
+    kk_el = floor((kk-1)/angle_num)+1;
+    kk_az = kk - (kk_el-1)*angle_num;
     FF(:,kk) = kron( FF_el(:,kk_el), FF_az(:,kk_az) );
 end
 
@@ -176,10 +176,10 @@ for mm=1:16
     [XDATA, YDATA] = meshgrid(-angle_range:angle_range,-angle_range:angle_range);
     
     figure(99)
-    subplot(M_burst_az, M_burst_el, mm)
+    subplot(M_burst_el, M_burst_az, mm)
     mesh(XDATA, YDATA, pattern_3D);hold on
-    xlabel('Az. [deg]')
-    ylabel('El. [deg]')
+    xlabel('El. [deg]')
+    ylabel('Az. [deg]')
     view(180, 90);
     
     if plot3Dpolar
@@ -189,7 +189,7 @@ for mm=1:16
         % need some weird shift to look correct
         theta_range  = 90+(-angle_range:angle_range);
         phi_range = -angle_range:angle_range;
-        patternCustom(pattern_3D', theta_range, phi_range)
+        patternCustom(pattern_3D, theta_range, phi_range)
     end
 end
 
