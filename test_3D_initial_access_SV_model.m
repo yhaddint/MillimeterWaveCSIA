@@ -34,6 +34,7 @@ Nb = 512;                                   % Sample per SS burst
 CFO_ppm = 0;                                % CFO in ppm
 CFO = (fc/1e6*CFO_ppm);                     % CFO with unit Hz
 eF = CFO*Ts*2*pi;                           % CFO normalized with Ts
+CFO_samp = eF;                              % same thing
 P = 128;                                    % Number of subcarrier for PSS
 DFT = dftmtx(P);
 to_est_CFO = 1;                             % Assuming perfect knowledge of CFO or not
@@ -42,6 +43,10 @@ refine_CFO = 1;                             % Turn on refine CFO when coarse est
 
 az_lim = pi/3;
 el_lim = pi/6;
+
+CP = 8;                                     % cyclic prefix in [samples]
+OFDM_sym_num = 4;                           % Num of OFDM in each burst
+burst_N = P * OFDM_sym_num;
 
 %-------------------------------------
 % Phase Noise Specification
@@ -95,6 +100,8 @@ M_BS_burst_az = 8;
 M_BS_burst_el = 2;
 M_UE_burst_az = 4;
 
+M_burst = [M_BS_burst_az*M_BS_burst_el, M_UE_burst_az];
+
 % angle grid for sector beams; sector approach gives estimator from grid
 BS_az_grid = (az_lim)*linspace(-1+(1/M_BS_burst_az),1-(1/M_BS_burst_az),M_BS_burst_az);
 BS_el_grid = (el_lim)*linspace(-1+(1/M_BS_burst_el),1-(1/M_BS_burst_el),M_BS_burst_el);
@@ -107,11 +114,23 @@ F_sec_mat = get_IA_BF_3D(Nt_az, Nt_el,...
                      'sector_FSM_KW', az_lim, el_lim); % Tx beamformer in IA stage
 
 
-% ---- signal length parameters --------
-ZC_root = 29; % ZC root, a coprime number with ZC length
-ZC_N = 127; % ZC sequence length
-seq = lteZadoffChuSeq(ZC_root,ZC_N);
-                
+% ---- PSS and signal length parameters --------
+ZC_root = 29;                               % ZC root, a coprime number with ZC length
+ZC_N = 127;                                 % ZC sequence length
+seq = lteZadoffChuSeq(ZC_root,ZC_N);        % Generate ZC sequence
+
+% Add CP in PSS
+seq_1DC = ifft(seq)*sqrt(ZC_N+1);           % Time domain signal used to ZC detection & STO estimation; DC subcarrier is not null
+burst_sig = [seq_1DC(end-CP+1:end);...
+             seq_1DC;...
+             zeros(burst_N-(ZC_N+CP),1)];   % each burst has one ZC (CP-ed) and something else (SSS/other control info)
+Tx_sig_CP = repmat(burst_sig,M,1);
+burst_length = length(burst_sig);           % Number of samples in M ZC burst
+Tx_sig_length = length(Tx_sig_CP);             % Number of samples in M ZC burst (leave space for STO)
+ZC_t_domain = conj(flipud(seq_1DC));  % ZC sequence used for correlation in Rx
+
+
+% Debug flag used somewhere
 debug_flag = 0;           
 
 % For loop for Monte Carlo Simulations (realization of g, angle spread, and beamformer)
@@ -184,11 +203,12 @@ for MCidx = 1:MCtimes
 %     g = g_cmplx;
     % Rotate of ray
     tau = rand*(90e-9);
+    pathdelay = [0];
     tau_samp(MCidx) = tau/Ts*2*pi;
 %     g_ray = (randn+1j*randn)/sqrt(2);
     g_ray = exp(1j*rand*2*pi);
-
-    % Pre-compute some vectors/matrices in FIM
+    
+    % Pre-compute some vectors/matrices
     for pathindex = 1:path_num
 
         % Spatial response and its derivative over phi
@@ -222,20 +242,7 @@ for MCidx = 1:MCtimes
         dqvec(:,mm) = exp(1j*Nb*(mm-1)*eF)*qvec.*Dqvec(:,mm);
     end
     
-    
-    % Pre-compute some equations, vecx, vecalpha, vecbeta
-    % vecx is derivative of phi_0 in f(r,eta)
-    vaa = zeros(M,1);
-    vad = zeros(M,1);
-    vda = zeros(M,1);
-    
-    % Zero initialization of vectors for FIM
-    vdcfo = zeros(P*M,1);
-    vdtheta = zeros(P*M,1);
-    vdphi = zeros(P*M,1);
-    vdtau = zeros(P*M,1);
-    vdalpha = zeros(P*M,1);
-    vdbeta = zeros(P*M,1);
+      
     
     % Received signals (Using random symbol or ZC sequence)
     symb = [seq;1]; %exp(1j*rand(P,1)*2*pi);
@@ -272,7 +279,115 @@ for MCidx = 1:MCtimes
                 *(diag(qvec)*DFT'*(fvec.*symb)) * exp(1j*Nb*(mm-1)*eF)).*PN_seq(indexPN);
         end
     end
+    
+    % ------- Precompute for Sector Search (no CP removal version) -------------
+    sig_rx_sec2 = zeros(P*M, 1);
+    STO = 100; % timing offset as the sample number
+    
+    % received sample number 
+    Rx_sig_length = burst_N * M + ZC_N - 1 + STO; % signal length after ZC correlation;
 
+    
+    
+    for path_index = 1:path_num
+        % ------- Channel Generation --------
+        H_chan = get_H_NB_3D(g_ray(path_index),...
+                             phi_az(path_index),...
+                             theta_az(path_index),...
+                             theta_el(path_index),...
+                             1,...                  % cluster number
+                             1,...                  % ray number
+                             Nt_az, Nt_el, Nr);     % Generate discrete time domain frequency-flat channel
+        H_chan0 = H_chan./norm(H_chan,'fro')*sqrt(Nt*Nr/path_num); % H per multipath
+
+        % ----- received signal generation ------
+        precoder_index_old = 0;
+        combiner_index_old = 0;
+        for nn=1:Tx_sig_length
+  
+            precoder_index = floor( (nn-1) / (burst_length*M_burst(2)) )+1;
+            combiner_index_raw = floor( (nn + STO - 1) / burst_length )+1;
+            combiner_index = mod(combiner_index_raw-1,M_burst(2))+1;
+
+            if (precoder_index ~= precoder_index_old) || (combiner_index ~= combiner_index_old)
+    %             fprintf('precoder index %d, ',precoder_index);
+    %             fprintf('combiner index %d\n',combiner_index); 
+                w_vec = W_sec_mat(:,combiner_index);
+                v_vec = F_sec_mat(:,precoder_index);
+                g_effective = (w_vec'*H_chan0*v_vec);
+                precoder_index_old = precoder_index;
+                combiner_index_old = combiner_index;
+            end
+%             index_debug(:,nn) = [precoder_index;combiner_index];
+            g_save_debug(nn) = g_effective;
+%             Rx_sig0(nn,path_index) = g_effective * Tx_sig(nn);
+        end % end of sample sweeping
+        Rx_sig0(:,path_index) = g_save_debug.' .* Tx_sig_CP;
+    end
+    
+    % ----- summation over all delay tap for freq selective sim --------
+    Rx_sig = zeros(burst_length*M,1);
+    for path_index = 1:path_num
+        timewindow0 = (1+pathdelay(path_index)):burst_length*M;
+        timewindow1 = 1:(burst_length*M-pathdelay(path_index));
+        Rx_sig(timewindow0,1) = Rx_sig(timewindow0,1) + Rx_sig0(timewindow1,path_index);
+    end
+    
+    % ------- AWGN -------
+    noise_CP = (randn(Tx_sig_length,1)+1j*randn(Tx_sig_length,1))/sqrt(2);
+    noise_at_STO = (randn(STO,1)+1j*randn(STO,1))/sqrt(2);
+    
+    % ----- Initializations of vec, mat -----
+%     Rx_sig = zeros(Tx_sig_length, 1); % received signal in t domain
+    corr_out_H1 = zeros(Rx_sig_length + burst_N - ZC_N + 1, 1); % pad a zero at the end
+    corr_out_H0 = zeros(Rx_sig_length + burst_N - ZC_N + 1,1); % pad a zero at the end
+    
+    % ----- For loop for SNR (detection part) -----
+    for ss = 1:SNR_num
+        noise_pow = 10^(-SNR_range(ss)/10);
+        awgn_CP = noise_CP * sqrt(noise_pow);
+        Rx_sig_H1 = Rx_sig.*exp(1j*CFO_samp*(0:length(Rx_sig)-1).') + awgn_CP ;
+        Rx_sig_H0 = awgn_CP;
+
+        % ------ T Domain ZC Correlation -------
+
+        Rx_sig_H0_wSTO = [noise_at_STO * sqrt(noise_pow); Rx_sig_H0];
+        Rx_sig_H1_wSTO = [noise_at_STO * sqrt(noise_pow); Rx_sig_H1];
+        corr_out_H1_STO = abs(conv(ZC_t_domain,Rx_sig_H1_wSTO)/ZC_N).^2; % corr rx t-domain sig with ZC
+        corr_out_H0_STO = abs(conv(ZC_t_domain,Rx_sig_H0_wSTO)/ZC_N).^2; % corr rx t-domain sig with ZC
+
+
+        BFtype = 'sector';
+        switch BFtype
+            
+            % ----- Multi-Peak Detection ---------
+            case 'PN'
+                % Practical scenario where peak location is unknown
+                post_corr_ED_H1 = sum(reshape([corr_out_H1_STO(ZC_N+CP:end);...
+                    zeros(burst_length*(M+2)-length(corr_out_H1_STO(ZC_N+CP:end)),1)],...
+                    burst_length,M+2),2)/M;
+
+                post_corr_ED_H0 = sum(reshape([corr_out_H0_STO(ZC_N+CP:end);...
+                    zeros(burst_length*(M+2)-length(corr_out_H0_STO(ZC_N+CP:end)),1)],...    
+                    burst_length,M+2),2)/M;
+
+
+                ave_Nc_H0 = Nc_acc_mtx*post_corr_ED_H0;
+                ave_Nc_H1 = Nc_acc_mtx*post_corr_ED_H1;
+                [peak_pow_H1(ss) peakindex_H1(ss)] = max(ave_Nc_H1(1:STO_max));
+                peak_pow_H0(ss) = max(ave_Nc_H0(1:STO_max));
+
+            % ----- Single-Peak Detection with directional beams---------
+            otherwise
+                % Practical scenario where peak location is unknown
+                peak_pow_H1(ss) = max(corr_out_H1_STO);
+                peak_pow_H0(ss) = max(corr_out_H0_STO);
+                peakindex_H1(ss) = 0;
+
+
+        end % end of switch
+    end % end of SNR sweeping
+    
     
     % ------------- For loop for Various SNR ----------------------
     for ss = 1:SNR_num
@@ -427,15 +542,7 @@ for MCidx = 1:MCtimes
                 % ----- true CFO (for debug) ---------
 %                 CFO_est = eF;
                 
-                %  --------- Simpler approach of estimating CFO  (no good)---------
-%                 CFO_est = angle(sum(sig_burst(find(CFO_select(:,dd)+1)))...
-%                     *conj(sum(sig_burst(find(CFO_select(:,dd))))))/Nb;
-
-                %  --------- simpler approach 2 (no good) ---------
-%                 pad = 511;
-%                 x_temp = sig_burst.*conj(Measure_mat_new(:,dd));
-%                 CFO_est = max(abs(fft([x_temp;zeros(pad*M,1)])))*(2*pi)/((pad+1)*Nb);
-                
+         
                 phase_error_mat = exp(1j*CFO_est*Nb*(0:M-1).');
                 phase_error = phase_error_mat;
                 CFO_final(dd) = CFO_est;
@@ -489,108 +596,13 @@ for MCidx = 1:MCtimes
 %             grid on
 %         end
         
-        % -------- Refinement to improve accuracy ----------------
-%         
-%         ii = 0;
-%         phi_hat = zeros(max_ite_num+1,1);
-%         theta_hat = zeros(max_ite_num+1,1);
-%         eF_hat = zeros(max_ite_num+1,1);
-%         alpha_hat = zeros(max_ite_num+1,1);
-%         
+    
         phi_az_hat(1) = bestAOA_az(MCidx,ss);
         theta_az_hat(1)= bestAOD_az(MCidx,ss);
         theta_el_hat(1)= bestAOD_el(MCidx,ss);
         eF_hat(1) = (CFO_final(bestindex_comp(MCidx))*Nb+2*pi)/Nb;
-%         stop_sign = 1;
-%         while stop_sign==0
-%             ii = ii + 1;
-%             %---------------------------------------------
-%             % Alpha estimation using previous coeff.
-%             %---------------------------------------------
-%             arx_hat = exp(1j*(0:Nr-1)'*pi*sin(phi_hat(ii)))/sqrt(Nr);
-%             atx_hat = exp(1j*(0:Nt-1)'*pi*sin(theta_hat(ii)))/sqrt(Nt);
-%             phase_error_refine = kron( exp(1j*eF_hat(ii)*Nb*(0:M-1)).',...
-%                                        exp(1j*eF_hat(ii)*(0:P-1).'));
-% 
-%             H_cal = diag(W' * arx_hat * atx_hat' * F);
-%             sig_alpha = kron(H_cal,delay_mtx(:,maxindex)).*phase_error_refine;
-%             alpha_hat(ii) = pinv(sig_alpha) * sig_noisy;
-%             error(ii) = norm(alpha_hat(ii)*sig_alpha - sig_noisy);
-%             
-%             % determine when to stop
-%             if ii>1
-%                 if error(ii) > error(ii-1)
-%                     stop_sign = 1;
-%                 end
-%                 if abs(error(ii)-error(ii-1))/abs(error(ii-1))<1e-4
-%                     stop_sign = 1;
-%                 end
-%                 if ii > max_ite_num
-%                     stop_sign = 1;
-%                 end
-%             end
-%             
-%             
-%             %---------------------------------------------
-%             % CFO estimation using previous coeff.
-%             %---------------------------------------------
-%             deF = 1j*kron(Nb*(0:M-1).',(0:P-1).')...
-%                 .*kron(exp(1j*eF_hat(ii)*Nb*(0:M-1).'),exp(1j*eF_hat(ii)*(0:P-1).'));
-% 
-%             H_cal = alpha_hat(ii) * diag(W' * arx_hat * atx_hat' * F);
-%             sig_deF = kron(H_cal,delay_mtx(:,maxindex)).*deF;
-%             sig_eF = kron(H_cal,delay_mtx(:,maxindex)).*phase_error_refine;
-%             
-%             yr = sig_noisy - sig_eF;
-%             Q_cal = [real(sig_deF);imag(sig_deF)];
-%             tr = [real(yr);imag(yr)];
-% 
-%             deF = pinv(Q_cal) * tr;
-%             eF_hat(ii+1) = eF_hat(ii) + deF;
-%             
-%             phase_error_refine = kron( exp(1j*eF_hat(ii+1)*Nb*(0:M-1)).',...
-%                                        exp(1j*eF_hat(ii+1)*(0:P-1).'));
-%             
-%             %---------------------------------------------
-%             % Phi estimation using previous coeff.
-%             %---------------------------------------------      
-%             dPhi = exp(1j*pi*(0:Nr-1).'*sin(phi_hat(ii)))/sqrt(Nr).*(1j*pi*(0:Nr-1).'*cos(phi_hat(ii)));
-%             
-%             D_cal = alpha_hat(ii) * diag(W' * dPhi * atx_hat' * F);
-%             H_cal = alpha_hat(ii) * diag(W' * arx_hat * atx_hat' * F);
-%             sig_dphi = kron(D_cal,delay_mtx(:,maxindex)).*phase_error_refine;
-%             sig_phi = kron(H_cal,delay_mtx(:,maxindex)).*phase_error_refine;
-%             
-%             yr = sig_noisy - sig_phi;
-%             Q_cal = [real(sig_dphi);imag(sig_dphi)];
-%             tr = [real(yr);imag(yr)];
-%             dphi = pinv(Q_cal) * tr;
-%             phi_hat(ii+1) = phi_hat(ii) + dphi;
-%             
-%             arx_hat = exp(1j*(0:Nr-1)'*pi*sin(phi_hat(ii+1)))/sqrt(Nr);
-%             
-%             %---------------------------------------------
-%             % Theta estimation using previous coeff.
-%             %---------------------------------------------      
-%             dTheta = exp(1j*pi*(0:Nt-1).'*sin(theta_hat(ii)))/sqrt(Nt).*(1j*pi*(0:Nt-1).'*cos(theta_hat(ii)));
-% 
-%             D_cal = alpha_hat(ii) * diag(W' * arx_hat * dTheta' * F);
-%             sig_dtheta = kron(D_cal,delay_mtx(:,maxindex)).*phase_error_refine;
-%             H_cal = alpha_hat(ii) * diag(W' * arx_hat * atx_hat' * F);
-%             sig_theta = kron(H_cal,delay_mtx(:,maxindex)).*phase_error_refine;
-%             
-%             yr = sig_noisy - sig_theta;
-%             Q_cal = [real(sig_dtheta);imag(sig_dtheta)];
-%             tr = [real(yr);imag(yr)];
-% 
-%             dtheta = pinv(Q_cal) * tr;
-%             theta_hat(ii+1) = theta_hat(ii) + dtheta;
-% 
-%         end
-%         theta_last = theta_hat(ii-1); %theta_hat(1); %
-%         phi_last = phi_hat(ii-1); %phi_hat(1);
-%         eF_last = eF_hat(ii-1); %eF_hat(1);
-        
+
+        % -------- error evaluation in beam training of CSIA ---------
         theta_az_last = theta_az_hat(1); %
         theta_el_last = theta_el_hat(1); %
         phi_az_last = phi_az_hat(1);
@@ -604,13 +616,10 @@ for MCidx = 1:MCtimes
 %         align_counter_nocomp(runindex,CFOindex) = (abs(AOA(runindex) - bestAOA_nocomp(runindex))<0.1)&&...
 %             (abs(AOD(runindex) - bestAOD_nocomp(runindex))<0.05);
 
-        % RMSE evaluation from CRLB perspective
-%         CRLB_CFO(ss,MCindex) = sqrt(temp(1,1))*(1/Ts/2/pi);
-%         CRLB_theta(ss,MCindex) = sqrt(temp(2,2))*(1/pi*180);
-%         CRLB_phi(ss,MCindex) = sqrt(temp(3,3))*(1/pi*180);
     end
 end
-%%
+%% Alignment evaluation
+
 for ss=1:SNR_num
 AOA_az_align_comp_mean(ss) = sum((AOA_az_error_comp(:,ss)/pi*180)<(105/Nr_az),1)/MCtimes;
 AOD_az_align_comp_mean(ss) = sum((AOD_az_error_comp(:,ss)/pi*180)<(105/Nt_az),1)/MCtimes;
@@ -635,100 +644,5 @@ grid on
 xlabel('SNR (dB)')
 ylabel('Misalignment Rate')
 legend('AoA (az)','AoD (az)','AOD (el)','Full Alignment')
-%% RMSE evaluation
-portion = 1; % for debug 
-for ss=1:SNR_num
-    delay_error = abs(delay_est(ss,:)-tau_samp).^2;
-    RMSE_delay(ss) = sqrt(mean(get_portion(delay_error,portion)))*(Ts/(2*pi)/1e-9);
-%     RMSE_delay(ss) = sqrt(mean((delay_error)))*(Ts/(2*pi)/1e-9);
 
-    
-    input_sig = abs(CFO_error(:,ss)).^2;
-    RMSE_CFO(ss) = sqrt(mean(get_portion(input_sig,portion)))*(1/Ts/2/pi);
-%     RMSE_CFO(ss) = sqrt(mean((input_sig)))*(1/Ts/2/pi);
 
-    
-    input_sig = abs(AOD_az_error_nocomp(:,ss)).^2;
-    RMSE_theta(ss) = sqrt(mean(get_portion(input_sig,portion)))*(1/pi*180);
-%     RMSE_theta(ss) = sqrt(mean((input_sig)))*(1/pi*180);
-
-    
-    input_sig = abs(AOA_error_nocomp(:,ss)).^2;
-%     RMSE_phi(ss) = sqrt(mean((input_sig)))*(1/pi*180);
-    RMSE_phi(ss) = sqrt(mean(get_portion(input_sig,portion)))*(1/pi*180);
-end
-figure
-subplot(311)
-semilogy(SNR_range,RMSE_delay);hold on
-grid on
-xlabel('Point-to-Point SNR [dB]')
-ylabel('RMSE of normalized delay [ns]')
-title('delay est')
-
-subplot(312)
-semilogy(SNR_range,RMSE_CFO);hold on
-grid on
-xlabel('Point-to-Point SNR [dB]')
-ylabel('RMSE of CFO est [Hz]')
-title('CFO est')
-
-subplot(313)
-semilogy(SNR_range,RMSE_theta);hold on
-semilogy(SNR_range,RMSE_phi);hold on
-grid on
-xlabel('Point-to-Point SNR [dB]')
-ylabel('RMSE of AoA/AoD [deg]')
-title('angle est')
-
-%%
-for ss=1:length(SNR_range)
-    for MCidx = 1:MCtimes
-        AOA_error_nofine(MCidx,ss) = abs(bestAOA(MCidx,ss) - phi0_az(MCidx));
-        AOD_error_nofine(MCidx,ss) = abs(bestAOD(MCidx,ss) - theta0_az(MCidx));
-    end
-        
-        input_sig = abs(AOD_error_nofine(:,ss)).^2;
-        RMSE_theta_nofine(ss) = sqrt(mean(get_portion(input_sig,portion)))*(1/pi*180);
-%     RMSE_theta(ss) = sqrt(mean((input_sig)))*(1/pi*180);
-
-    
-        input_sig = abs(AOA_error_nofine(:,ss)).^2;
-%     RMSE_phi(ss) = sqrt(mean((input_sig)))*(1/pi*180);
-        RMSE_phi_nofine(ss) = sqrt(mean(get_portion(input_sig,portion)))*(1/pi*180);
-end
-
-figure
-semilogy(SNR_range,RMSE_theta_nofine);hold on
-semilogy(SNR_range,RMSE_phi_nofine);hold on
-grid on
-xlabel('SNR [dB]')
-ylabel('RMSE of AoA/AoD [deg]')
-title('angle est w/o refinement')
-
-%% Plot CRLB of angle est./tracking
-% figure
-% subplot(211)
-% semilogy(SNR_range,mean(CRLB_theta,2));hold on
-% semilogy(SNR_range,mean(CRLB_phi,2));hold on
-% grid on
-% legend('Theta','Phi')
-% xlabel('Point-to-Point SNR [dB]')
-% ylabel('RMSE of AoA/AoD [deg]')
-% 
-% subplot(212)
-% semilogy(SNR_range,mean(CRLB_CFO,2));hold on
-% grid on
-% title('CRLB of CFO')
-% xlabel('Point-to-Point SNR [dB]')
-% ylabel('RMSE of CFO [Hz]')
-
-% figure
-% semilogy(SNR_range,mean(CRLB_rest1,2));hold on
-% semilogy(SNR_range,mean(CRLB_rest1,2));hold on
-% grid on
-% legend('CRLB Ray 1','CRLB Ray 2')
-%% best should be 3691
-for mm=1:10
-    tempchan(mm) = (W(:,mm)'*arx(:,ll)) * conj(F(:,mm)'*atx(:,ll));
-end
-[Measure_mat_new(1:10,3691) 22.6175*tempchan.']
