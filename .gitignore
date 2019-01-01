@@ -8,3 +8,5 @@
 *.eps
 # ignore all gif files
 *.gif
+# ignore all doc in Figures
+Figures/
