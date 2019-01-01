@@ -148,12 +148,15 @@ function [  peak_pow_H1,...
                           1,...
                           ray_num,...
                           Nt, Nr); % Generate discrete time domain frequency-flat channel
-        H_chan0 = H_chan./norm(H_chan,'fro')*sqrt(Nt*Nr/cluster_num);
+        H_chan0 = H_chan./norm(H_chan,'fro')*sqrt(Nt*Nr/cluster_num); % H per multipath
 
         % ----- received signal generation ------
         precoder_index_old = 0;
         combiner_index_old = 0;
         for nn=1:Tx_sig_length
+            
+% I've turned off switch since it saves time in large scale sim; get it
+% back later!
 %             switch BFtype 
 %                 case 'PN' % w/ PN BF, BF changes every burst_length samples 
                 precoder_index = floor( (nn-1) / burst_length )+1;
