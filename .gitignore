@@ -2,3 +2,9 @@
 *.mat
 # ignore all matlab asv files
 *.asv
+# ignore all matlab figure files
+*.fig
+# ignore all matlab eps files
+*.eps
+# ignore all gif files
+*.gif
