@@ -20,7 +20,7 @@ Nt_az = 16;                                 % Num of antenna in BS/Tx (azimuth)
 Nt_el = 8;                                  % Num of antenna in BS/Tx (elevation) 
 
 M = 64;                                     % Length of SS bursts (IA OFDM symbols)
-MCtimes = 5e1;                             % Num of Monte Carlo Sim.
+MCtimes = 1e1;                             % Num of Monte Carlo Sim.
 
 AOAspread2 = 0;                             % Intra-cluster AoA spread square 
 AOAspread = 0;                              % Intra-cluster AoA spread RMS 
@@ -31,7 +31,7 @@ SNR_range = linspace(30,30,SNR_num);
 BW = 57.6e6;                                % IA bandiwdth [Hz]
 Ts = 1/BW;                                  % Sample duration
 Nb = 512;                                   % Sample per SS burst
-CFO_ppm = 0;                                % CFO in ppm
+CFO_ppm = 1;                                % CFO in ppm
 CFO = (fc/1e6*CFO_ppm);                     % CFO with unit Hz
 eF = CFO*Ts*2*pi;                           % CFO normalized with Ts
 CFO_samp = eF;                              % same thing
@@ -142,11 +142,66 @@ for MCidx = 1:MCtimes
     clc
     fprintf('iteration %d:\n',MCidx);
 
-    % ------- Compressive Approach -------------
-%     debug_flag = 0;
-%     if MCindex==1
-%         debug_flag = 1;
-%     end
+    
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    %
+    %       Channel parameter and related
+    %
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+    % AoA of rays with disired seperation
+    phi_az = zeros(path_num,1);
+    phi0_az(MCidx) = (rand*90-45)/180*pi;;%20/180*pi;%0.2618;%(rand*90-45)/180*pi;
+    phi_az = phi0_az(MCidx) + randn(path_num,1) * AOAspread;
+
+    % AoD of rays with disired seperation
+    theta_az = zeros(path_num,1);
+    theta_el = zeros(path_num,1);
+
+    theta0_az(MCidx) = (rand*90-45)/180*pi;%20/180*pi;%0.1309;%;
+    theta0_el(MCidx) = (rand*30-15)/180*pi;%0;%0.2618;%;
+
+    theta_az = theta0_az(MCidx) + randn(path_num,1) * AODspread;
+    theta_el = theta0_el(MCidx) + randn(path_num,1) * AOAspread;
+
+    
+    % Find True AoA/AoD in grid (for debug)
+    [~,row_true] = min(abs(cand_angle_r_az - phi0_az(MCidx)));
+    [~,col_az_true] = min(abs(cand_angle_t_az - theta0_az(MCidx)));
+    [~,col_el_true] = min(abs(cand_angle_t_el - theta0_el(MCidx)));
+    
+    index_true = ((col_el_true-1) * cand_num_t_az + col_az_true - 1) * cand_num_r_az + row_true;
+
+    % Rotate of ray
+    tau = rand*(90e-9);
+    pathdelay = [0];
+    tau_samp(MCidx) = tau/Ts*2*pi;
+    g_ray = exp(1j*rand*2*pi);
+    
+    % Pre-compute some vectors/matrices
+    for pathindex = 1:path_num
+
+        % Spatial response and its derivative over phi
+        arx_az(:,pathindex) = exp(1j * pi * (0:Nr_az-1)' * sin(phi_az(pathindex)))/sqrt(Nr_az);
+        arx(:,pathindex) = arx_az(:,pathindex);
+
+        % Spatial response and its derivative over theta
+        atx_az(:,pathindex) = exp(1j * pi * (0:Nt_az-1)' * sin(theta_az(pathindex)))/sqrt(Nt_az);
+        atx_el(:,pathindex) = exp(1j * pi * (0:Nt_el-1)' * sin(theta_el(pathindex)))/sqrt(Nt_el);
+        atx(:,pathindex) = kron( atx_el(:,pathindex), atx_az(:,pathindex) );
+        
+        % Delay response and its derivative over tau
+        fvec(:,pathindex) = exp(-1j * (0:P-1)' * tau_samp(MCidx) / P);
+
+    end
+    
+    
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    %
+    %       IA Beamformer and related
+    %
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    
     
     % Receiver beamformer: 1) quasi-omni beam from random steering mtx; 2)
     % directional beam from angle steering vector
@@ -166,6 +221,13 @@ for MCidx = 1:MCtimes
         Measure_mat_new_norm(cc) = norm(Measure_mat_new(:,cc),2)^2;
     end
     
+    
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    %
+    %       Waveform and related
+    %
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    
     % weighted average
     for dd=1:dict_num
         index_new = [abs(Measure_mat_new(1:M-1,dd)),abs(Measure_mat_new(2:M,dd))];
@@ -175,60 +237,6 @@ for MCidx = 1:MCtimes
     end
 
     
-%     probe_Tx_BF = ones(Nt,M);
-%     F = probe_Tx_BF./norm(probe_Tx_BF,'fro')*sqrt(Nt*M);   
-
-    % AoA of rays with disired seperation
-    phi_az = zeros(path_num,1);
-    phi0_az(MCidx) = 0.2618;%(rand*90-45)/180*pi;
-    phi_az = phi0_az(MCidx) + randn(path_num,1) * AOAspread;
-
-    % AoD of rays with disired seperation
-    theta_az = zeros(path_num,1);
-    theta_el = zeros(path_num,1);
-
-    theta0_az(MCidx) = 0.1309;%(rand*90-45)/180*pi;
-    theta0_el(MCidx) = 0.2618;%(rand*30-15)/180*pi;
-
-    theta_az = theta0_az(MCidx) + randn(path_num,1) * AODspread;
-    theta_el = theta0_el(MCidx) + randn(path_num,1) * AOAspread;
-
-    
-    % Find True AoA/AoD in grid (for debug)
-    [~,row_true] = min(abs(cand_angle_r_az - phi0_az(MCidx)));
-    [~,col_az_true] = min(abs(cand_angle_t_az - theta0_az(MCidx)));
-    [~,col_el_true] = min(abs(cand_angle_t_el - theta0_el(MCidx)));
-    
-    index_true = ((col_el_true-1) * cand_num_t_az + col_az_true - 1) * cand_num_r_az + row_true;
-
-%     % Gain
-%     g_cmplx = exp(1j*rand(ray_num,1)*2*pi)/sqrt(ray_num);
-%     g = g_cmplx;
-    % Rotate of ray
-    tau = rand*(90e-9);
-    pathdelay = [0];
-    tau_samp(MCidx) = tau/Ts*2*pi;
-%     g_ray = (randn+1j*randn)/sqrt(2);
-    g_ray = exp(1j*rand*2*pi);
-    
-    % Pre-compute some vectors/matrices
-    for pathindex = 1:path_num
-
-        % Spatial response and its derivative over phi
-        arx_az(:,pathindex) = exp(1j * pi * (0:Nr_az-1)' * sin(phi_az(pathindex)))/sqrt(Nr_az);
-        arx(:,pathindex) = arx_az(:,pathindex);
-
-        % Spatial response and its derivative over theta
-        atx_az(:,pathindex) = exp(1j * pi * (0:Nt_az-1)' * sin(theta_az(pathindex)))/sqrt(Nt_az);
-        atx_el(:,pathindex) = exp(1j * pi * (0:Nt_el-1)' * sin(theta_el(pathindex)))/sqrt(Nt_el);
-        atx(:,pathindex) = kron( atx_el(:,pathindex), atx_az(:,pathindex) );
-        
-        % Delay response and its derivative over tau
-        fvec(:,pathindex) = exp(-1j * (0:P-1)' * tau_samp(MCidx) / P);
-%         Dfvec(:,pathindex) = -1j * (0:P-1)'/P;
-%         dfvec(:,pathindex) = Dfvec(:,pathindex).*fvec(:,pathindex);
-    end
-    
     % ------ Phase noise process -----------
     PN_seq = zeros(Nb * M, 1);
     PN_seq(1) = 1;
@@ -237,16 +245,10 @@ for MCidx = 1:MCtimes
     end
     
     
-    % About CFO and its derivative
+    % ------ About CFO and its derivative --------
     qvec = exp(1j * (0:P-1)' * eF);
-    for mm=1:M
-        timeindex = ((mm-1)*Nb+0):((mm-1)*Nb+P-1);
-        Dqvec(:,mm) = 1j * (timeindex).';
-        dqvec(:,mm) = exp(1j*Nb*(mm-1)*eF)*qvec.*Dqvec(:,mm);
-    end
     
       
-    
     % Received signals (Using random symbol or ZC sequence)
     symb = [seq;1]; %exp(1j*rand(P,1)*2*pi);
     tau_num = 500;
@@ -255,7 +257,7 @@ for MCidx = 1:MCtimes
         delay_mtx(:,tt) = DFT'*(exp(-1j * (0:P-1)' * delay_cand(tt) / P).*symb);
     end
     
-
+    % ------- Precompute for CS Search (assuming ideal detection) -------------
     sig_rx = zeros(P*M, 1);
     for ll=1:path_num
         for mm=1:M
@@ -293,7 +295,7 @@ for MCidx = 1:MCtimes
     
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     %
-    %     Sector approach
+    %     IA waveform (Sector Approach)
     %
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     for path_index = 1:path_num
@@ -312,13 +314,12 @@ for MCidx = 1:MCtimes
         combiner_index_old = 0;
         for nn=1:Tx_sig_length
 
-                precoder_index = floor( (nn-1) / (burst_length*M_burst(2)) )+1;
-                combiner_index_raw = floor( (nn + STO - 1) / burst_length )+1;
-                combiner_index = mod(combiner_index_raw-1,M_burst(2))+1;
+            precoder_index = floor( (nn-1) / (burst_length*M_burst(2)) )+1;
+            combiner_index_raw = floor( (nn + STO - 1) / burst_length )+1;
+            combiner_index = mod(combiner_index_raw-1,M_burst(2))+1;
 
             if (precoder_index ~= precoder_index_old) || (combiner_index ~= combiner_index_old)
-    %             fprintf('precoder index %d, ',precoder_index);
-    %             fprintf('combiner index %d\n',combiner_index); 
+
                 w_vec = W_sec_mat(:,combiner_index);
                 v_vec = F_sec_mat(:,precoder_index);
                 g_effective = (w_vec'*H_chan0*v_vec);
@@ -332,7 +333,7 @@ for MCidx = 1:MCtimes
         Rx_sig0_sec(:,path_index) = g_save_debug.' .* Tx_sig_CP;
     end
     
-    % ----- summation over all delay tap for freq selective sim --------
+    % ----- Summation over all delay tap for freq selective sim --------
     Rx_sig_sec = zeros(burst_length*M,1);
     for path_index = 1:path_num
         timewindow0 = (1+pathdelay(path_index)):burst_length*M;
@@ -342,7 +343,7 @@ for MCidx = 1:MCtimes
     
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     %
-    %     PN approach
+    %     IA waveform (PN approach)
     %
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     Nc_acc_mtx = toeplitz([1,zeros(1,burst_length-Nc)]',[ones(1,Nc),zeros(1,burst_length-Nc)]);
@@ -386,13 +387,19 @@ for MCidx = 1:MCtimes
     for path_index = 1:path_num
         timewindow0 = (1+pathdelay(path_index)):burst_length*M;
         timewindow1 = 1:(burst_length*M-pathdelay(path_index));
-        Rx_sig_PN(timewindow0,1) = Rx_sig_PN(timewindow0,1) + Rx_sig0_sec(timewindow1,path_index);
+        Rx_sig_PN(timewindow0,1) = Rx_sig_PN(timewindow0,1) + Rx_sig0_PN(timewindow1,path_index);
     end
-    
     
     % ------- AWGN -------
     noise_CP = (randn(Tx_sig_length,1)+1j*randn(Tx_sig_length,1))/sqrt(2);
     noise_at_STO = (randn(STO,1)+1j*randn(STO,1))/sqrt(2);
+    
+    
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    %
+    %     Detection and Timing Est. from Waveform (both approach)
+    %
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     
     % ----- Initializations of vec, mat -----
 %     Rx_sig = zeros(Tx_sig_length, 1); % received signal in t domain
@@ -451,27 +458,47 @@ for MCidx = 1:MCtimes
 
 
         end % end of switch
-    end % end of SNR sweeping
+%     end % end of SNR sweeping
     
     
-    % ------------- For loop for Various SNR (Beam Training part)----------------------
-    for ss = 1:SNR_num
+%     % ------------- For loop for Various SNR (Beam Training part)----------------------
+%     for ss = 1:SNR_num
         
         % SNR and Adding AWGN to Rx Signal
         sigman2 = 10^(-SNR_range(ss)/10);
-        sig_noisy = sig_rx + awgn * sqrt(sigman2);
+%         sig_noisy = sig_rx + awgn * sqrt(sigman2);
         
-        % -------- Sector Approach -------
+        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        %
+        %     Sig. Rearrangement from Est STO (PN beacon)
+        %
+        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        
+        sig_rx_from_dec = zeros(P*M,1);
+        for mm=1:M
+            index = (mm-1)*P+1:mm*P;
+            index_from_rx_sig = peakindex_H1(ss) + CP + ((mm-1)*Nb:(mm-1)*Nb+P-1);
+            sig_rx_from_dec(index) = Rx_sig_H1_wSTO(index_from_rx_sig);
+        end
+        sig_noisy = sig_rx_from_dec;
+        
+        
+        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        %
+        %     BF Training (Sector Approach)
+        %
+        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
         sig_sec_ave = mean(abs(reshape(sig_rx_sec + awgn * sqrt(sigman2), P, M)).^2,1);
         [~,best_sec_idx] = max(sig_sec_ave);
         
-        % Use SS burst index to get sector index in UE, BS_az, and BS_el
+        % From SS burst index to get sector index in UE, BS_az, and BS_el
         best_sec_BS_idx = floor((best_sec_idx-1)/M_UE_burst_az)+1;
         best_sec_UE_idx = best_sec_idx - (best_sec_BS_idx-1)*M_UE_burst_az;
         best_sec_BS_el_idx = floor((best_sec_BS_idx-1)/M_BS_burst_az)+1;
         best_sec_BS_az_idx = best_sec_BS_idx - (best_sec_BS_el_idx-1)*M_BS_burst_az;
         
-        % use sector index to get propagation angle etimation
+        % From sector index to index in the angle estimation
         sec_UE_az_est = UE_az_grid(best_sec_UE_idx);
         sec_BS_az_est = BS_az_grid(best_sec_BS_az_idx);
         sec_BS_el_est = BS_el_grid(best_sec_BS_el_idx);
@@ -482,35 +509,16 @@ for MCidx = 1:MCtimes
         AOD_el_error_sec(MCidx,ss) = abs(sec_BS_el_est - theta0_el(MCidx));
         
         
-        % -------- CFO Estimation and Delay Matching Pursuit ------------
+        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        %
+        %     BF Training (Compressive Approach)
+        %
+        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        
+        % -------- Delay Matching Pursuit ------------
         sig_ave = mean(reshape(sig_noisy,P,M),2);
         for tt=1:tau_num
-%             if MCindex==1 & tt==6
-%                 apple=1;
-%             end
-            
-            % If selected delay candidate is true, sig.*conj(p_kx) is like
-            % tone signal
-            sig_tone = sig_ave.*conj(delay_mtx(:,tt))./abs(delay_mtx(:,tt)).^2;
-            
-%             % Method1 ML estimation of CFO; Kay's paper on freq. est. of tone
-            for pp = 1:P-1
-                CFO_hat(pp) = angle(sig_tone(pp+1).*conj(sig_tone(pp)));
-            end
-            CFO_est = sum(CFO_hat)/(P-1);
-            
-            % Method2 ML estimation of CFO; Kay's paper on freq. est. of tone
-            for pp = 1:P-1
-                CFO_hat(pp) = sig_tone(pp+1).*conj(sig_tone(pp));
-            end
-            CFO_est = angle(sum(CFO_hat)/(P-1));
-            CFO_est = 0;
-            
-            % Use the ML CFO to evaluate efficacy of delay candidate
-            CFO_est1 = angle(mean(exp(1j*CFO_hat)));
-%             CFO_est = eF; % For debug; plug-in true CFO
-            sig_deCFO = sig_ave.*exp(-1j*CFO_est*(0:P-1).');
-            score(tt) = abs(sum(sig_deCFO.*conj(delay_mtx(:,tt)))/norm(delay_mtx(:,tt))^2);
+            score(tt) = abs(sum(sig_ave.*conj(delay_mtx(:,tt)))/norm(delay_mtx(:,tt))^2);
         end
         
         % Plug-in Matching Pursuit index for CFO and Delay est.
@@ -521,7 +529,7 @@ for MCidx = 1:MCtimes
         % watch score to debug
 %         figure;plot(delay_cand/2/pi*Ts/1e-9,score)
         
-        % ---------------   AoA/AoD Estimation   ----------------
+        % ---------------   Compensate Impact of Delay Taps   ----------------
         sig_desymb = zeros(M,1);
         
         % Evaluate average sample over each SS burst
@@ -537,7 +545,7 @@ for MCidx = 1:MCtimes
             phase_error = phase_error_mat;
         end
         
-        % Matching pursuit for all AoA/AoD pair in dictionary
+        %------  Matching Pursuit LOOP (AoA/AoD pair in dictionary) ------
         for dd=1:dict_num
             
             % Debug flag, used by seting AoA=AoD = 0
@@ -585,20 +593,10 @@ for MCidx = 1:MCtimes
                     CFO_range = linspace(CFO_est*0.7,CFO_est*1.4,10);
                     score_CFO = zeros(10,1);
                 for zz=1:10
-%                     CFO_estold = CFO_est;
-%                     phase_error_mat = exp(1j*CFO_estold*Nb*(0:M-1).');
-%                     x_vec_CFO = Measure_mat_new(:,dd).*phase_error_mat;
-%                     y_vec_CFO = sig_desymb;
-%                     opt_alpha = 1;
-%                     error_CFO_est =  y_vec_CFO - opt_alpha*x_vec_CFO;
-%                     sig_deF = Measure_mat_new(:,dd).*(1j*(Nb*(0:M-1).').*exp(1j*CFO_estold*Nb*(0:M-1).'));           
-%                     Q_cal = [real(sig_deF);imag(sig_deF)];
-%                     tr = [real(error_CFO_est);imag(error_CFO_est)];
-%                     deF = pinv(Q_cal) * tr;
-%                     CFO_est = CFO_estold + deF;
+
                     phase_est_test = exp(1j*CFO_range(zz)*Nb*(0:M-1).');
                     score_CFO(zz) = abs(sig_desymb'*(Measure_mat_new(:,dd).* phase_est_test));
-%                     phase_error_mat = exp(1j*CFO_estold*Nb*(0:M-1).');
+
                 end
                 [~,CFO_index] = max(score_CFO);
                 CFO_est = CFO_range(CFO_index);
@@ -607,7 +605,6 @@ for MCidx = 1:MCtimes
                 % ----- true CFO (for debug) ---------
 %                 CFO_est = eF;
                 
-         
                 phase_error_mat = exp(1j*CFO_est*Nb*(0:M-1).');
                 phase_error = phase_error_mat;
                 CFO_final(dd) = CFO_est;
@@ -624,10 +621,10 @@ for MCidx = 1:MCtimes
         bestrow_el = floor((bestrow-1)/cand_num_t_az)+1;
         bestrow_az = bestrow - (bestrow_el-1)*cand_num_t_az;
         
-        bestAOA_az(MCidx,ss) = (bestcol-1)*AOAstep_az-60*pi/180;
+        bestAOA_az(MCidx,ss) = (bestcol-1)*AOAstep_az-az_lim;
         
-        bestAOD_az(MCidx,ss) = (bestrow_az-1)*AODstep_az-60*pi/180;
-        bestAOD_el(MCidx,ss) = (bestrow_el-1)*AODstep_el-30*pi/180;
+        bestAOD_az(MCidx,ss) = (bestrow_az-1)*AODstep_az-az_lim;
+        bestAOD_el(MCidx,ss) = (bestrow_el-1)*AODstep_el-el_lim;
         
         % Plot score for debug
         if 0%debug_flag
@@ -648,38 +645,12 @@ for MCidx = 1:MCtimes
             plot(CFO_est_range,score_test_CFO)
 
         end
-        
-%         if debug_flag
-%             figure;
-%             subplot(211)
-%             plot(CFO_hat_new1(CFO_select(:,dd))/Nb/eF)
-%             title('single sample pair angle est')
-%             grid on
-%             subplot(212);
-%             plot(abs(CFO_hat_new2(CFO_select(:,dd))))
-%             title('sample mag')
-%             grid on
-%         end
-        
-    
-        phi_az_hat(1) = bestAOA_az(MCidx,ss);
-        theta_az_hat(1)= bestAOD_az(MCidx,ss);
-        theta_el_hat(1)= bestAOD_el(MCidx,ss);
-        eF_hat(1) = (CFO_final(bestindex_comp(MCidx))*Nb+2*pi)/Nb;
 
-        % -------- error evaluation in beam training of CSIA ---------
-        theta_az_last = theta_az_hat(1); %
-        theta_el_last = theta_el_hat(1); %
-        phi_az_last = phi_az_hat(1);
-        eF_last = eF_hat(1);
-        
-        AOA_az_error_comp(MCidx,ss) = abs(phi_az_last - phi0_az(MCidx));
-        AOD_az_error_comp(MCidx,ss) = abs(theta_az_last - theta0_az(MCidx));
-        AOD_el_error_comp(MCidx,ss) = abs(theta_el_last - theta0_el(MCidx));
-        
-        CFO_error(MCidx,ss) = abs(eF_last- eF);
-%         align_counter_nocomp(runindex,CFOindex) = (abs(AOA(runindex) - bestAOA_nocomp(runindex))<0.1)&&...
-%             (abs(AOD(runindex) - bestAOD_nocomp(runindex))<0.05);
+        % -------- Error Evaluation in beam training of CSIA ---------       
+        AOA_az_error_comp(MCidx,ss) = abs(bestAOA_az(MCidx,ss) - phi0_az(MCidx));
+        AOD_az_error_comp(MCidx,ss) = abs(bestAOD_az(MCidx,ss) - theta0_az(MCidx));
+        AOD_el_error_comp(MCidx,ss) = abs(bestAOD_el(MCidx,ss) - theta0_el(MCidx));
+        CFO_error(MCidx,ss) = abs((CFO_final(bestindex_comp(MCidx))*Nb+2*pi)/Nb - eF);
 
     end
 end
@@ -703,7 +674,7 @@ figure
 plot(SNR_range,AOA_az_align_comp_mean,'-','linewidth',2);hold on
 plot(SNR_range,AOD_az_align_comp_mean,'-','linewidth',2);hold on
 plot(SNR_range,AOD_el_align_comp_mean,'-','linewidth',2);hold on
-plot(SNR_range,Align_comp_mean,'-','linewidth',2);hold on
+plot(SNR_range,Align_comp_mean,'-o','linewidth',2);hold on
 
 grid on
 xlabel('SNR (dB)')
