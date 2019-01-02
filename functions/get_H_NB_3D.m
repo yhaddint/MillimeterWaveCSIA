@@ -25,7 +25,7 @@ function [ H_NB ] = get_H_NB( raygain, rayAOA, rayAOD_az, rayAOD_el, cluster_num
             theta_el = rayAOD_el(cluster_index, ray_index);
             
             atx_az = exp(1j*(0:Nt_az-1)'*pi*sin(theta_az))/sqrt(Nt_az);   
-            atx_el = exp(1j*(0:Nt_el-1)'*pi*sin(theta_az))/sqrt(Nt_el); 
+            atx_el = exp(1j*(0:Nt_el-1)'*pi*sin(theta_el))/sqrt(Nt_el); 
             
             atx = kron( atx_el, atx_az );
             
