@@ -20,14 +20,14 @@ Nt_az = 16;                                 % Num of antenna in BS/Tx (azimuth)
 Nt_el = 8;                                  % Num of antenna in BS/Tx (elevation) 
 
 M = 64;                                     % Length of SS bursts (IA OFDM symbols)
-MCtimes = 1e1;                             % Num of Monte Carlo Sim.
+MCtimes = 2e1;                             % Num of Monte Carlo Sim.
 
 AOAspread2 = 0;                             % Intra-cluster AoA spread square 
 AOAspread = 0;                              % Intra-cluster AoA spread RMS 
 AODspread2 = 0;                             % Intra-cluster AoD spread RMS 
 AODspread = 0;                              % Intra-cluster AoD spread RMS 
-SNR_num = 1;                               % Num of Monte Carlo Sim.
-SNR_range = linspace(30,30,SNR_num);
+SNR_num = 4;                               % Num of Monte Carlo Sim.
+SNR_range = linspace(-30,0,SNR_num);
 BW = 57.6e6;                                % IA bandiwdth [Hz]
 Ts = 1/BW;                                  % Sample duration
 Nb = 512;                                   % Sample per SS burst
@@ -49,7 +49,7 @@ el_lim = pi/6;                              % El. range limit (by default -30 to
 
 CP = 8;                                     % cyclic prefix in [samples]
 OFDM_sym_num = 4;                           % Num of OFDM in each burst
-burst_N = P * OFDM_sym_num;
+burst_N = P * OFDM_sym_num;                 % Num of sample in each SS burst
 
 %-------------------------------------
 % Phase Noise Specification
@@ -63,42 +63,46 @@ PN_sigma2 = VCO_c*4*pi^2*fc^2*Ts;           % Time domain variance of PN Wiener 
 PN_sigma = sqrt(PN_sigma2);                 % Weiner process RMS imcrement
 
 
-%-------- CS dictionary generation -------------
-cand_num_r_az = 17;                         % Grid size for AoA Azimuth (2 times Nr_az)
+%-------- CS Dictionary generation -------------
+cand_num_r_az = 2 * Nr_az+ 1;               % Grid size for AoA Azimuth (2 times Nr_az)
 cand_num_r_el = 1;                          % Grid size for AoA Elevation (1 by default)
 
-cand_num_t_az = 33;                         % Grid size for AoD Azimuth (2 times Nt_az)
-cand_num_t_el = 17;                         % Grid size for AoD elevation (2 times Nt_el)
+cand_num_t_az = 2 * Nt_az+ 1;               % Grid size for AoD Azimuth (2 times Nt_az)
+cand_num_t_el = 2 * Nt_el+ 1;               % Grid size for AoD elevation (2 times Nt_el)
 
 dict_num = cand_num_r_az * cand_num_r_el * cand_num_t_az * cand_num_t_el;
 
 cand_y = zeros(M, dict_num);
 
-cand_angle_r_az = linspace(-az_lim, az_lim, cand_num_r_az);
-AOAstep_az = cand_angle_r_az(2)-cand_angle_r_az(1);
+OMP_grid_rx_az = linspace(-az_lim, az_lim, cand_num_r_az);
+AOAstep_az = OMP_grid_rx_az(2) - OMP_grid_rx_az(1);
 
-cand_angle_t_el = linspace(-el_lim, el_lim, cand_num_t_el);
-AODstep_el = cand_angle_t_el(2)-cand_angle_t_el(1);
+OMP_grid_tx_el = linspace(-el_lim, el_lim, cand_num_t_el);
+AODstep_el = OMP_grid_tx_el(2) - OMP_grid_tx_el(1);
 
-cand_angle_t_az = linspace(-az_lim, az_lim, cand_num_t_az);
-AODstep_az = cand_angle_t_az(2)-cand_angle_t_az(1);
+OMP_grid_tx_az = linspace(-az_lim, az_lim, cand_num_t_az);
+AODstep_az = OMP_grid_tx_az(2) - OMP_grid_tx_az(1);
 
-cand_ARV_r_az = exp(1j*(0:Nr_az-1)'*pi*sin(cand_angle_r_az));
-cand_ARV_r = cand_ARV_r_az;
+grid_ARV_r_az = exp(1j*(0:Nr_az-1)'*pi*sin(OMP_grid_rx_az));
+grid_ARV_r = grid_ARV_r_az;
 
-cand_ARV_t_az = exp(1j*(0:Nt_az-1)'*pi*sin(cand_angle_t_az));
-cand_ARV_t_el = exp(1j*(0:Nt_el-1)'*pi*sin(cand_angle_t_el));
+grid_ARV_t_az = exp(1j*(0:Nt_az-1)'*pi*sin(OMP_grid_tx_az));
+grid_ARV_t_el = exp(1j*(0:Nt_el-1)'*pi*sin(OMP_grid_tx_el));
 
 % Planar geometry is [ANT_row1.'; ANT_row2.' cdots, ANT_row_Nr_el.']
-cand_ARV_t = kron(cand_ARV_t_el, cand_ARV_t_az);
+grid_ARV_t = kron(grid_ARV_t_el, grid_ARV_t_az);
 
-% test scenario when assuming CFO is known
+% Scenario when assuming CFO is known (debug)
 phase_error_mat = kron(exp(1j*eF*Nb*(0:M-1)),exp(1j*eF*(0:P-1)'));
 phase_error = reshape(phase_error_mat,M*P,1);
 
 
-% ------- Precompute codebook for Sector Search -------------
-% number of sector beams in steering
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%
+%       IA Sector Sounding BF and related
+%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Number of sector beams in steering (total M=64)
 M_BS_burst_az = 8;
 M_BS_burst_el = 2;
 M_UE_burst_az = 4;
@@ -123,53 +127,52 @@ ZC_N = 127;                                 % ZC sequence length
 seq = lteZadoffChuSeq(ZC_root,ZC_N);        % Generate ZC sequence
 
 % Add CP in PSS
-seq_1DC = ifft(seq)*sqrt(ZC_N+1);           % Time domain signal used to ZC detection & STO estimation; DC subcarrier is not null
-burst_sig = [seq_1DC(end-CP+1:end);...
-             seq_1DC;...
-             zeros(burst_N-(ZC_N+CP),1)];   % each burst has one ZC (CP-ed) and something else (SSS/other control info)
-Tx_sig_CP = repmat(burst_sig,M,1);
-burst_length = length(burst_sig);           % Number of samples in M ZC burst
-Tx_sig_length = length(Tx_sig_CP);             % Number of samples in M ZC burst (leave space for STO)
-ZC_t_domain = conj(flipud(seq_1DC));  % ZC sequence used for correlation in Rx
+seq_1DC = ifft(seq)*sqrt(ZC_N+1);           % T-domain sig. for ZC corr in detction & STO estimation; DC subcarrier is not null
+burst_sig = [seq_1DC(end-CP+1:end);...      % CP
+             seq_1DC;...                    % ZC seq. in T-domain
+             zeros(burst_N-(ZC_N+CP),1)];   % SSS/PBCH but modeled as zero here
+Tx_sig_CP = repmat(burst_sig,M,1);          % Repetition for M burst
+burst_length = length(burst_sig);           % Num. of samples in M ZC burst
+Tx_sig_length = length(Tx_sig_CP);          % Num. of samples in M ZC burst (leave space for STO)
+ZC_t_domain = conj(flipud(seq_1DC));        % ZC sequence used for correlation in Rx
 
 
 % Debug flag used somewhere
 debug_flag = 0;           
 
-% For loop for Monte Carlo Simulations (realization of g, angle spread, and beamformer)
+% For loop of Monte Carlo Sim. (iid. Realization of Channel, Noise, and Sounding BF)
 for MCidx = 1:MCtimes
     
-    clc
-    fprintf('iteration %d:\n',MCidx);
-
+    % Print iteration num.
+    clc; fprintf('Monte Carlo Run %d out of %d\n',MCidx, MCtimes);
     
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     %
-    %       Channel parameter and related
+    %       Channel parameter and related (SV model)
     %
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
     % AoA of rays with disired seperation
     phi_az = zeros(path_num,1);
-    phi0_az(MCidx) = (rand*90-45)/180*pi;;%20/180*pi;%0.2618;%(rand*90-45)/180*pi;
+    phi0_az(MCidx) = (rand*90-45)/180*pi;%20/180*pi;%(rand*90-45)/180*pi;0.2618;%
     phi_az = phi0_az(MCidx) + randn(path_num,1) * AOAspread;
 
     % AoD of rays with disired seperation
     theta_az = zeros(path_num,1);
     theta_el = zeros(path_num,1);
 
-    theta0_az(MCidx) = (rand*90-45)/180*pi;%20/180*pi;%0.1309;%;
-    theta0_el(MCidx) = (rand*30-15)/180*pi;%0;%0.2618;%;
+    theta0_az(MCidx) = (rand*90-45)/180*pi;%20/180*pi;%; 0.1309;%
+    theta0_el(MCidx) = (rand*30-15)/180*pi;%0;%%;0.2618;%
 
     theta_az = theta0_az(MCidx) + randn(path_num,1) * AODspread;
     theta_el = theta0_el(MCidx) + randn(path_num,1) * AOAspread;
-
     
-    % Find True AoA/AoD in grid (for debug)
-    [~,row_true] = min(abs(cand_angle_r_az - phi0_az(MCidx)));
-    [~,col_az_true] = min(abs(cand_angle_t_az - theta0_az(MCidx)));
-    [~,col_el_true] = min(abs(cand_angle_t_el - theta0_el(MCidx)));
+    % Find closest AoA/AoD in grid (for debug)
+    [~,row_true] = min(abs(OMP_grid_rx_az - phi0_az(MCidx)));
+    [~,col_az_true] = min(abs(OMP_grid_tx_az - theta0_az(MCidx)));
+    [~,col_el_true] = min(abs(OMP_grid_tx_el - theta0_el(MCidx)));
     
+    % Find index in dictionary that correponding to closest AoA/AoD
     index_true = ((col_el_true-1) * cand_num_t_az + col_az_true - 1) * cand_num_r_az + row_true;
 
     % Rotate of ray
@@ -180,11 +183,11 @@ for MCidx = 1:MCtimes
     
     % Pre-compute some vectors/matrices
     for pathindex = 1:path_num
-
+        
         % Spatial response and its derivative over phi
         arx_az(:,pathindex) = exp(1j * pi * (0:Nr_az-1)' * sin(phi_az(pathindex)))/sqrt(Nr_az);
         arx(:,pathindex) = arx_az(:,pathindex);
-
+        
         % Spatial response and its derivative over theta
         atx_az(:,pathindex) = exp(1j * pi * (0:Nt_az-1)' * sin(theta_az(pathindex)))/sqrt(Nt_az);
         atx_el(:,pathindex) = exp(1j * pi * (0:Nt_el-1)' * sin(theta_el(pathindex)))/sqrt(Nt_el);
@@ -192,16 +195,14 @@ for MCidx = 1:MCtimes
         
         % Delay response and its derivative over tau
         fvec(:,pathindex) = exp(-1j * (0:P-1)' * tau_samp(MCidx) / P);
-
+        
     end
-    
     
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     %
-    %       IA Beamformer and related
+    %       IA PN Sounding BF and related
     %
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    
     
     % Receiver beamformer: 1) quasi-omni beam from random steering mtx; 2)
     % directional beam from angle steering vector
@@ -211,20 +212,23 @@ for MCidx = 1:MCtimes
     probe_Tx_BF = (randi(2,Nt,M)*2-3) + 1j * (randi(2,Nt,M)*2-3);
     F = probe_Tx_BF./norm(probe_Tx_BF,'fro')*sqrt(Nt*M);
     
-    Measure_mat = kron(transpose(F)*conj(cand_ARV_t),W'*cand_ARV_r);
+    Measure_mat = kron(transpose(F)*conj(grid_ARV_t),W'*grid_ARV_r);
+    
+    % Only each pair of m-th column of F and W are useful
     select_row = zeros(1,M);
     for ii=1:M
-        select_row(ii) = (ii-1)*M+ii;
+        select_row(ii) = (ii-1) * M + ii;
     end
     Measure_mat_new = Measure_mat(select_row,:);
+    
+    % Precompute normalization
     for cc=1:cand_num_r_az*cand_num_t_az
         Measure_mat_new_norm(cc) = norm(Measure_mat_new(:,cc),2)^2;
     end
     
-    
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     %
-    %       Waveform and related
+    %       Waveform, Phase Error and related
     %
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     
@@ -236,7 +240,6 @@ for MCidx = 1:MCtimes
         CFO_select(:,dd) = CFO_weight_norm>1/M;
     end
 
-    
     % ------ Phase noise process -----------
     PN_seq = zeros(Nb * M, 1);
     PN_seq(1) = 1;
@@ -244,12 +247,10 @@ for MCidx = 1:MCtimes
         PN_seq(ll+1) = PN_seq(ll).*exp(1j * randn * PN_sigma);
     end
     
-    
     % ------ About CFO and its derivative --------
     qvec = exp(1j * (0:P-1)' * eF);
     
-      
-    % Received signals (Using random symbol or ZC sequence)
+    % Received signals (When Ideal CP-Removal is Used)
     symb = [seq;1]; %exp(1j*rand(P,1)*2*pi);
     tau_num = 500;
     delay_cand = linspace(0,100,tau_num)*1e-9/Ts*2*pi;
@@ -257,7 +258,7 @@ for MCidx = 1:MCtimes
         delay_mtx(:,tt) = DFT'*(exp(-1j * (0:P-1)' * delay_cand(tt) / P).*symb);
     end
     
-    % ------- Precompute for CS Search (assuming ideal detection) -------------
+    % ------- Precompute for CS Search (When Ideal CP-Removal is Used) -------------
     sig_rx = zeros(P*M, 1);
     for ll=1:path_num
         for mm=1:M
@@ -270,7 +271,7 @@ for MCidx = 1:MCtimes
     
     awgn = (randn(P*M,1)+1j*randn(P*M,1))/sqrt(2);
     
-    % ------- Precompute for Sector Search (assuming ideal detection) -------------
+    % ------- Precompute for Sector Search (When Ideal CP-Removal is Used) -------------
     sig_rx_sec = zeros(P*M, 1);
     for ll=1:path_num
         for mm=1:M
@@ -285,7 +286,7 @@ for MCidx = 1:MCtimes
         end
     end
     
-    % ------- Precompute for Sector Search (no CP removal version) -------------
+    % ------- Precompute for Sector Search (When Nonideal CP-Removal is Used) -------------
     sig_rx_sec2 = zeros(P*M, 1);
     STO = 100; % timing offset as the sample number
     
@@ -295,7 +296,7 @@ for MCidx = 1:MCtimes
     
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     %
-    %     IA waveform (Sector Approach)
+    %     IA Waveform (Sector Approach, when Nonideal CP-Removal is Used)
     %
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     for path_index = 1:path_num
@@ -343,7 +344,7 @@ for MCidx = 1:MCtimes
     
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     %
-    %     IA waveform (PN approach)
+    %     IA waveform (PN approach, when Nonideal CP-Removal is Used)
     %
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     Nc_acc_mtx = toeplitz([1,zeros(1,burst_length-Nc)]',[ones(1,Nc),zeros(1,burst_length-Nc)]);
@@ -409,17 +410,18 @@ for MCidx = 1:MCtimes
     % ----- For loop for SNR (Both BF Approach; In Detection) -----
     BFtype = 'PN';
     for ss = 1:SNR_num
+        
         noise_pow = 10^(-SNR_range(ss)/10);
         awgn_CP = noise_CP * sqrt(noise_pow);
-        switch BFtype
-            case 'sector'
-                Rx_sig_H1 = Rx_sig_sec.*exp(1j*CFO_samp*(0:length(Rx_sig_sec)-1).') + awgn_CP ;
-                Rx_sig_H0 = awgn_CP;
-            case 'PN'
-                Rx_sig_H1 = Rx_sig_PN.*exp(1j*CFO_samp*(0:length(Rx_sig_PN)-1).') + awgn_CP ;
-                Rx_sig_H0 = awgn_CP;
-                
-        end
+        
+        % case 'sector'
+        Rx_sig_H1_sec = Rx_sig_sec.*exp(1j*CFO_samp*(0:length(Rx_sig_sec)-1).') + awgn_CP ;
+        Rx_sig_H0_sec = awgn_CP;
+        
+        % case 'PN'
+        Rx_sig_H1 = Rx_sig_PN.*exp(1j*CFO_samp*(0:length(Rx_sig_PN)-1).') + awgn_CP ;
+        Rx_sig_H0 = awgn_CP;
+
 
         % ------ T Domain ZC Correlation -------
 
@@ -428,60 +430,56 @@ for MCidx = 1:MCtimes
         corr_out_H1_STO = abs(conv(ZC_t_domain,Rx_sig_H1_wSTO)/ZC_N).^2; % corr rx t-domain sig with ZC
         corr_out_H0_STO = abs(conv(ZC_t_domain,Rx_sig_H0_wSTO)/ZC_N).^2; % corr rx t-domain sig with ZC
 
+        Rx_sig_H0_wSTO_sec = [noise_at_STO * sqrt(noise_pow); Rx_sig_H0_sec];
+        Rx_sig_H1_wSTO_sec = [noise_at_STO * sqrt(noise_pow); Rx_sig_H1_sec];
+        corr_out_H1_STO_sec = abs(conv(ZC_t_domain,Rx_sig_H1_wSTO_sec)/ZC_N).^2; % corr rx t-domain sig with ZC
+        corr_out_H0_STO_sec = abs(conv(ZC_t_domain,Rx_sig_H0_wSTO_sec)/ZC_N).^2; % corr rx t-domain sig with ZC
+        
+        % ----- Multi-Peak Detection w. PN beam ---------
+        % Practical scenario where peak location is unknown
+        post_corr_ED_H1 = sum(reshape([corr_out_H1_STO(ZC_N+CP:end);...
+            zeros(burst_length*(M+2)-length(corr_out_H1_STO(ZC_N+CP:end)),1)],...
+            burst_length,M+2),2)/M;
+
+        post_corr_ED_H0 = sum(reshape([corr_out_H0_STO(ZC_N+CP:end);...
+            zeros(burst_length*(M+2)-length(corr_out_H0_STO(ZC_N+CP:end)),1)],...    
+            burst_length,M+2),2)/M;
+
+        ave_Nc_H0 = Nc_acc_mtx*post_corr_ED_H0;
+        ave_Nc_H1 = Nc_acc_mtx*post_corr_ED_H1;
+        [peak_pow_H1(ss) peakindex_H1(ss)] = max(ave_Nc_H1(1:STO_max));
+        peak_pow_H0(ss) = max(ave_Nc_H0(1:STO_max));
+
+        % ----- Single-Peak Detection w. directional beams---------
+        % Practical scenario where peak location is unknown
+        peak_pow_H1_sec(ss) = max(corr_out_H1_STO_sec);
+        peak_pow_H0_sec(ss) = max(corr_out_H0_STO_sec);
 
         
-        switch BFtype
-            
-            % ----- Multi-Peak Detection ---------
-            case 'PN'
-                % Practical scenario where peak location is unknown
-                post_corr_ED_H1 = sum(reshape([corr_out_H1_STO(ZC_N+CP:end);...
-                    zeros(burst_length*(M+2)-length(corr_out_H1_STO(ZC_N+CP:end)),1)],...
-                    burst_length,M+2),2)/M;
-
-                post_corr_ED_H0 = sum(reshape([corr_out_H0_STO(ZC_N+CP:end);...
-                    zeros(burst_length*(M+2)-length(corr_out_H0_STO(ZC_N+CP:end)),1)],...    
-                    burst_length,M+2),2)/M;
-
-
-                ave_Nc_H0 = Nc_acc_mtx*post_corr_ED_H0;
-                ave_Nc_H1 = Nc_acc_mtx*post_corr_ED_H1;
-                [peak_pow_H1(ss) peakindex_H1(ss)] = max(ave_Nc_H1(1:STO_max));
-                peak_pow_H0(ss) = max(ave_Nc_H0(1:STO_max));
-
-            % ----- Single-Peak Detection with directional beams---------
-            otherwise
-                % Practical scenario where peak location is unknown
-                peak_pow_H1(ss) = max(corr_out_H1_STO);
-                peak_pow_H0(ss) = max(corr_out_H0_STO);
-                peakindex_H1(ss) = 0;
-
-
-        end % end of switch
-%     end % end of SNR sweeping
-    
-    
-%     % ------------- For loop for Various SNR (Beam Training part)----------------------
-%     for ss = 1:SNR_num
-        
-        % SNR and Adding AWGN to Rx Signal
-        sigman2 = 10^(-SNR_range(ss)/10);
-%         sig_noisy = sig_rx + awgn * sqrt(sigman2);
+        % SNR and Adding AWGN to Rx Signal (when Ideal CP-removal Sig. for ChEst)
+%         sigman2 = 10^(-SNR_range(ss)/10);
+%         sig_noisy = sig_rx + awgn * sqrt(sigman2); % Use 
         
         %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
         %
-        %     Sig. Rearrangement from Est STO (PN beacon)
+        %     Sig. Rearrangement from Est STO (CP-Removal, PSS extraction)
         %
         %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
         
         sig_rx_from_dec = zeros(P*M,1);
+        sig_rx_from_dec_sec = zeros(P*M,1);
         for mm=1:M
             index = (mm-1)*P+1:mm*P;
             index_from_rx_sig = peakindex_H1(ss) + CP + ((mm-1)*Nb:(mm-1)*Nb+P-1);
             sig_rx_from_dec(index) = Rx_sig_H1_wSTO(index_from_rx_sig);
+            
+            % there must be some way for timing est. of sec beam
+            % but here I just use ideal STO as "optimistic" results 
+            index_from_rx_sig_sec = (STO+1) + CP + ((mm-1)*Nb:(mm-1)*Nb+P-1);
+            sig_rx_from_dec_sec(index) = Rx_sig_H1_wSTO_sec(index_from_rx_sig);
         end
         sig_noisy = sig_rx_from_dec;
-        
+        sig_noisy_sec = sig_rx_from_dec_sec;
         
         %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
         %
@@ -489,7 +487,8 @@ for MCidx = 1:MCtimes
         %
         %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-        sig_sec_ave = mean(abs(reshape(sig_rx_sec + awgn * sqrt(sigman2), P, M)).^2,1);
+%         sig_sec_ave = mean(abs(reshape(sig_rx_sec + awgn * sqrt(sigman2), P, M)).^2,1);
+        sig_sec_ave = mean(abs(reshape(sig_noisy_sec, P, M)).^2,1);
         [~,best_sec_idx] = max(sig_sec_ave);
         
         % From SS burst index to get sector index in UE, BS_az, and BS_el
@@ -508,14 +507,13 @@ for MCidx = 1:MCtimes
         AOD_az_error_sec(MCidx,ss) = abs(sec_BS_az_est - theta0_az(MCidx));
         AOD_el_error_sec(MCidx,ss) = abs(sec_BS_el_est - theta0_el(MCidx));
         
-        
         %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
         %
         %     BF Training (Compressive Approach)
         %
         %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
         
-        % -------- Delay Matching Pursuit ------------
+        % -------- Delay Matching Pursuit (Ignore CFO) ------------
         sig_ave = mean(reshape(sig_noisy,P,M),2);
         for tt=1:tau_num
             score(tt) = abs(sum(sig_ave.*conj(delay_mtx(:,tt)))/norm(delay_mtx(:,tt))^2);
@@ -560,8 +558,7 @@ for MCidx = 1:MCtimes
 %             end
 %             sig_cand = kron(Measure_mat_new(:,dd),delay_mtx(:,maxindex));
             
-            % use estimated CFO or perfect CFO to comp phase error
-
+            % Estimated CFO or assuming perfect CFO info in debug
             if to_est_CFO
                 
                 sig_burst = sig_desymb.*conj(Measure_mat_new(:,dd))./abs(Measure_mat_new(:,dd));
@@ -569,7 +566,7 @@ for MCidx = 1:MCtimes
                 % adjust N/A numbers
                 sig_burst(isnan(sig_burst))=0;
                 
-%                 %  ---------  Quasi-ML Method 1  ---------
+%                 %  ---------  Quasi-ML CFO est. Method 1 (M2 is faster)  ---------
 %                 CFO_hat_new1 = zeros(M-1,1);
 %                 for mm=1:M-1
 %                     if CFO_select(mm,dd)
@@ -579,7 +576,7 @@ for MCidx = 1:MCtimes
 %                 CFO_est = sum(CFO_hat_new1)/sum(CFO_select(:,dd))/Nb;
 
 %                 
-                %  ---------  Quasi ML Method 2  ---------
+                %  ---------  Quasi ML CFO est. Method 2  ---------
                 CFO_hat_new2 = zeros(M-1,1);
                 for mm=1:M-1
                     if CFO_select(mm,dd)
@@ -612,9 +609,13 @@ for MCidx = 1:MCtimes
             score_final(dd) = abs(sig_desymb'*(Measure_mat_new(:,dd).* phase_error))...
                 /(Measure_mat_new(:,dd)'*Measure_mat_new(:,dd));
         end
+        
+        % Get index in dictionary w. highest MP peak
         [~,bestindex_comp(MCidx)] = max(abs(score_final));
         
-%         bestindex_comp(MCindex) = index_true;% debug. comment in main script
+%         bestindex_comp(MCindex) = index_true; % debug. comment in main script
+
+        % From index to on-grid angle estimator
         bestrow = floor((bestindex_comp(MCidx)-1)/cand_num_r_az)+1;
         bestcol = bestindex_comp(MCidx)-(bestrow-1)*cand_num_r_az;
         
@@ -628,7 +629,9 @@ for MCidx = 1:MCtimes
         
         % Plot score for debug
         if 0%debug_flag
-            figure;plot(abs(score_final));hold on;plot(index_true,abs(score_final(index_true)),'o','linewidth',2,'markersize',10);
+            figure;
+            plot(abs(score_final));hold on;
+            plot(index_true,abs(score_final(index_true)),'o','linewidth',2,'markersize',10);
             grid on
             legend('scores','true AoA/AoD pair')
             
@@ -656,14 +659,20 @@ for MCidx = 1:MCtimes
 end
 %% Alignment evaluation
 
-for ss=1:SNR_num
-AOA_az_align_comp_mean(ss) = sum((AOA_az_error_comp(:,ss)/pi*180)<(105/Nr_az),1)/MCtimes;
-AOD_az_align_comp_mean(ss) = sum((AOD_az_error_comp(:,ss)/pi*180)<(105/Nt_az),1)/MCtimes;
-AOD_el_align_comp_mean(ss) = sum((AOD_el_error_comp(:,ss)/pi*180)<(105/Nt_el),1)/MCtimes;
+critical_width = 60; % 3dB beam width (half) 105/2 [deg]
 
-Align_comp_mean(ss) = sum(((AOD_az_error_comp(:,ss)/pi*180)<(105/Nt_az)&...
-                           (AOD_el_error_comp(:,ss)/pi*180)<(105/Nt_el)&...
-                           (AOA_az_error_comp(:,ss)/pi*180)<(105/Nr_az)),1)/MCtimes;
+for ss=1:SNR_num
+AOA_az_align_comp_mean(ss) = sum((AOA_az_error_comp(:,ss)/pi*180)<(critical_width/Nr_az),1)/MCtimes;
+AOD_az_align_comp_mean(ss) = sum((AOD_az_error_comp(:,ss)/pi*180)<(critical_width/Nt_az),1)/MCtimes;
+AOD_el_align_comp_mean(ss) = sum((AOD_el_error_comp(:,ss)/pi*180)<(critical_width/Nt_el),1)/MCtimes;
+
+Align_comp_mean(ss) = sum(((AOD_az_error_comp(:,ss)/pi*180)<(critical_width/Nt_az)&...
+                           (AOD_el_error_comp(:,ss)/pi*180)<(critical_width/Nt_el)&...
+                           (AOA_az_error_comp(:,ss)/pi*180)<(critical_width/Nr_az)),1)/MCtimes;
+                       
+Align_sec_mean(ss) = sum((( AOD_az_error_sec(:,ss)/pi*180)<(critical_width/Nt_az)&...
+                           (AOD_el_error_sec(:,ss)/pi*180)<(critical_width/Nt_el)&...
+                           (AOA_az_error_sec(:,ss)/pi*180)<(critical_width/Nr_az)),1)/MCtimes;
 
 end
 
@@ -671,14 +680,18 @@ figure
 % plot(SNR_range,AOAalign_comp_mean,'--','linewidth',2);hold on
 % plot(SNR_range,AODalign_comp_mean,'--','linewidth',2);hold on
 
-plot(SNR_range,AOA_az_align_comp_mean,'-','linewidth',2);hold on
-plot(SNR_range,AOD_az_align_comp_mean,'-','linewidth',2);hold on
-plot(SNR_range,AOD_el_align_comp_mean,'-','linewidth',2);hold on
+% plot(SNR_range,AOA_az_align_comp_mean,'-','linewidth',2);hold on
+% plot(SNR_range,AOD_az_align_comp_mean,'-','linewidth',2);hold on
+% plot(SNR_range,AOD_el_align_comp_mean,'-','linewidth',2);hold on
 plot(SNR_range,Align_comp_mean,'-o','linewidth',2);hold on
+plot(SNR_range,Align_sec_mean,'--x','linewidth',2);hold on
+
+
 
 grid on
 xlabel('SNR (dB)')
 ylabel('Misalignment Rate')
-legend('AoA (az)','AoD (az)','AOD (el)','Full Alignment')
+% legend('AoA (az)','AoD (az)','AOD (el)','Full Alignment')
+legend('CSIA, mmMAGIC UMi LOS','DIA, mmMAGIC UMi LOS')
 
 
