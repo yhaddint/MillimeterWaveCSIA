@@ -183,13 +183,14 @@ for mm=1:16
     view(180, 90);
     
     if plot3Dpolar
-        figure((100+mm))
-        subplot(M_burst_az, M_burst_el,mm)
+        figure(100+mm)
+%         subplot(M_burst_az, M_burst_el,mm)
         
         % need some weird shift to look correct
         theta_range  = 90+(-angle_range:angle_range);
         phi_range = -angle_range:angle_range;
-        patternCustom(pattern_3D, theta_range, phi_range)
+        fig = patternCustom(pattern_3D, theta_range, phi_range);hold on
+%         saveas(fig,[num2str(mm) '.jpeg']);
     end
 end
 
