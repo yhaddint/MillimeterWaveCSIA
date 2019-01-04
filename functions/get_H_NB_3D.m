@@ -1,4 +1,4 @@
-function [ H_NB ] = get_H_NB( raygain, rayAOA, rayAOD_az, rayAOD_el, cluster_num, ray_num, Nt_az, Nt_el, Nr )
+function [ H_NB ] = get_H_NB_3D( raygain, rayAOA_az, rayAOA_el, rayAOD_az, rayAOD_el, cluster_num, ray_num, Nt_az, Nt_el, Nr_az, Nr_el )
 %GET_H_FREQ Summary of this function goes here
 %   This is the function used for most script
 %   Channel model is H = sum
@@ -16,11 +16,20 @@ function [ H_NB ] = get_H_NB( raygain, rayAOA, rayAOD_az, rayAOD_el, cluster_num
 %   IP: Nr is number of antenna (ULA) in receiver
     
     Nt = Nt_az*Nt_el;
+    Nr = Nr_az*Nr_el;
+    
     H_NB = zeros(Nr,Nt);
     for cluster_index = 1:cluster_num
         for ray_index = 1:ray_num
-            phi = rayAOA(cluster_index, ray_index);
-            arx = exp(1j*(0:Nr-1)'*pi*sin(phi))/sqrt(Nr);
+            
+            phi_az = rayAOA_az(cluster_index, ray_index);
+            phi_el = rayAOA_el(cluster_index, ray_index);
+            
+            arx_az = exp(1j*(0:Nr_az-1)'*pi*sin(phi_az))/sqrt(Nr_az);
+            arx_el = exp(1j*(0:Nr_el-1)'*pi*sin(phi_el))/sqrt(Nr_el);
+            
+            arx = kron( arx_el, arx_az );
+            
             theta_az = rayAOD_az(cluster_index, ray_index);
             theta_el = rayAOD_el(cluster_index, ray_index);
             
