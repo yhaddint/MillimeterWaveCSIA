@@ -22,14 +22,15 @@ Nt_el = 16;                                  % Num of antenna in BS/Tx (elevatio
 M = 64;                                     % Length of SS bursts (IA OFDM symbols)
 MCtimes = 2e1;                              % Num of Monte Carlo Sim.
 
-% mmMAGIC UMi NLOS scene parameter
+% mmMAGIC UMi NLOS scene parameter (intra-cluster)
 AOAspread_az = 22.1/180*pi;                 % Intra-cluster AoA spread square 
 AOAspread_el = 10.0/180*pi;                 % Intra-cluster AoA spread RMS 
-AODspread_el = 0.30/180*pi;                 % Intra-cluster AoD spread RMS 
 AODspread_az = 5.40/180*pi;                 % Intra-cluster AoD spread RMS 
+AODspread_el = 0.30/180*pi;                 % Intra-cluster AoD spread RMS 
+tauspread    = 10e-9;                       % intra-cluster delay spread RMS [second]
 
 SNR_num = 1;                                % Num of Monte Carlo Sim.
-SNR_range = linspace(0,0,SNR_num);
+SNR_range = linspace(60,60,SNR_num);
 BW = 57.6e6;                                % IA bandiwdth [Hz]
 Ts = 1/BW;                                  % Sample duration
 Nb = 512;                                   % Sample per SS burst
@@ -199,6 +200,8 @@ for MCidx = 1:MCtimes
     theta_az = theta0_az(MCidx) + laprnd(path_num, 1, 0, AODspread_az);
     theta_el = theta0_el(MCidx) + laprnd(path_num, 1, 0, AODspread_el);
     
+    ray_delay = 30e-9 + rand(path_num,1)*tauspread;
+    
     % Find closest AoA/AoD in grid (for debug)
     [~,row_az_true] = min(abs(OMP_grid_rx_az - phi0_az(MCidx)));
     [~,row_el_true] = min(abs(OMP_grid_rx_el - phi0_el(MCidx)));
@@ -213,8 +216,28 @@ for MCidx = 1:MCtimes
     % Rotate of ray
     tau = rand*(90e-9);
     pathdelay = zeros(path_num,1);
+    tap_max = 4;
+    tapdelay = 0:(tap_max-1);
     tau_samp(MCidx) = tau/Ts*2*pi;
     g_ray = exp(1j*rand(path_num,1)*2*pi);
+    
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    %
+    %       Test wideband channel in tap domain
+    %
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    H_chan_WB = get_H_WB_3D(g_ray.',...
+                            ray_delay.',...
+                            phi_az.',...
+                            phi_el.',...
+                            theta_az.',...
+                            theta_el.',...
+                            1,...                  % cluster number
+                            path_num,...           % ray number
+                            Nt_az, Nt_el,...
+                            Nr_az, Nr_el,...
+                            Ts,P);
+                         
     
     % Pre-compute some vectors/matrices
     for pathindex = 1:path_num
@@ -335,18 +358,47 @@ for MCidx = 1:MCtimes
     %     IA Waveform (Sector Approach, when Nonideal CP-Removal is Used)
     %
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    for path_index = 1:path_num
+%     for path_index = 1:path_num
+%         % ------- MIMO Channel Generation (for each delay tap)--------
+%         H_chan = get_H_NB_3D(g_ray(path_index),...
+%                              phi_az(path_index),...
+%                              phi_el(path_index),...
+%                              theta_az(path_index),...
+%                              theta_el(path_index),...
+%                              1,...                  % cluster number
+%                              1,...                  % ray number, 1 at a time
+%                              Nt_az, Nt_el,...
+%                              Nr_az, Nr_el);         % Generate discrete time domain frequency-flat channel
+%         H_chan0 = H_chan./norm(H_chan,'fro')*sqrt(Nt*Nr/path_num); % H per multipath
+% 
+%         % ----- sector version received signal generation ------
+%         precoder_index_old = 0;
+%         combiner_index_old = 0;
+%         for nn=1:Tx_sig_length
+% 
+%             precoder_index = floor( (nn-1) / (burst_length*M_burst(2)) )+1;
+%             combiner_index_raw = floor( (nn + STO - 1) / burst_length )+1;
+%             combiner_index = mod(combiner_index_raw-1,M_burst(2))+1;
+% 
+%             if (precoder_index ~= precoder_index_old) || (combiner_index ~= combiner_index_old)
+% 
+%                 w_vec = W_sec_mat(:,combiner_index);
+%                 v_vec = F_sec_mat(:,precoder_index);
+%                 g_effective = (w_vec'*H_chan0*v_vec);
+%                 precoder_index_old = precoder_index;
+%                 combiner_index_old = combiner_index;
+%             end
+% %             index_debug(:,nn) = [precoder_index;combiner_index];
+%             g_save_debug(nn) = g_effective;
+% %             Rx_sig0(nn,path_index) = g_effective * Tx_sig(nn);
+%         end % end of sample sweeping
+%         Rx_sig0_sec(:,path_index) = g_save_debug.' .* Tx_sig_CP;
+%     end
+    
+    for tap_index = 1:tap_max
         % ------- MIMO Channel Generation (for each delay tap)--------
-        H_chan = get_H_NB_3D(g_ray(path_index),...
-                             phi_az(path_index),...
-                             phi_el(path_index),...
-                             theta_az(path_index),...
-                             theta_el(path_index),...
-                             1,...                  % cluster number
-                             1,...                  % ray number
-                             Nt_az, Nt_el,...
-                             Nr_az, Nr_el);         % Generate discrete time domain frequency-flat channel
-        H_chan0 = H_chan./norm(H_chan,'fro')*sqrt(Nt*Nr/path_num); % H per multipath
+
+%         H_chan0 = H_chan./norm(H_chan,'fro')*sqrt(Nt*Nr/path_num); % H per multipath
 
         % ----- sector version received signal generation ------
         precoder_index_old = 0;
@@ -361,7 +413,7 @@ for MCidx = 1:MCtimes
 
                 w_vec = W_sec_mat(:,combiner_index);
                 v_vec = F_sec_mat(:,precoder_index);
-                g_effective = (w_vec'*H_chan0*v_vec);
+                g_effective = (w_vec'*squeeze(H_chan_WB(:,:,tap_index))*v_vec);
                 precoder_index_old = precoder_index;
                 combiner_index_old = combiner_index;
             end
@@ -369,15 +421,16 @@ for MCidx = 1:MCtimes
             g_save_debug(nn) = g_effective;
 %             Rx_sig0(nn,path_index) = g_effective * Tx_sig(nn);
         end % end of sample sweeping
-        Rx_sig0_sec(:,path_index) = g_save_debug.' .* Tx_sig_CP;
+        Rx_sig0_sec(:,tap_index) = g_save_debug.' .* Tx_sig_CP;
     end
+    
     
     % ----- Summation over all delay tap for freq selective sim --------
     Rx_sig_sec = zeros(burst_length*M,1);
-    for path_index = 1:path_num
-        timewindow0 = (1+pathdelay(path_index)):burst_length*M;
-        timewindow1 = 1:(burst_length*M-pathdelay(path_index));
-        Rx_sig_sec(timewindow0,1) = Rx_sig_sec(timewindow0,1) + Rx_sig0_sec(timewindow1,path_index);
+    for tap_index = 1:tap_max
+        timewindow0 = (1+tapdelay(tap_index)):burst_length*M;
+        timewindow1 = 1:(burst_length*M-tapdelay(tap_index));
+        Rx_sig_sec(timewindow0,1) = Rx_sig_sec(timewindow0,1) + Rx_sig0_sec(timewindow1,tap_index);
     end
     
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -386,19 +439,19 @@ for MCidx = 1:MCtimes
     %
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     Nc_acc_mtx = toeplitz([1,zeros(1,burst_length-Nc)]',[ones(1,Nc),zeros(1,burst_length-Nc)]);
-    for path_index = 1:path_num
+    
         % ------- Channel Generation --------
-        H_chan = get_H_NB_3D(g_ray(path_index),...
-                             phi_az(path_index),...
-                             phi_el(path_index),...
-                             theta_az(path_index),...
-                             theta_el(path_index),...
-                             1,...                  % cluster number
-                             1,...                  % ray number
-                             Nt_az, Nt_el,...
-                             Nr_az, Nr_el);         % Generate discrete time domain frequency-flat channel
-        H_chan0 = H_chan./norm(H_chan,'fro')*sqrt(Nt*Nr/path_num); % H per multipath
-
+%         H_chan = get_H_NB_3D(g_ray(path_index),...
+%                              phi_az(path_index),...
+%                              phi_el(path_index),...
+%                              theta_az(path_index),...
+%                              theta_el(path_index),...
+%                              1,...                  % cluster number
+%                              1,...                  % ray number, 1 at a time
+%                              Nt_az, Nt_el,...
+%                              Nr_az, Nr_el);         % Generate discrete time domain frequency-flat channel
+%         H_chan0 = H_chan./norm(H_chan,'fro')*sqrt(Nt*Nr/path_num); % H per multipath
+    for tap_index = 1:tap_max
         % ----- sector version received signal generation ------
         precoder_index_old = 0;
         combiner_index_old = 0;
@@ -412,7 +465,7 @@ for MCidx = 1:MCtimes
 
                 w_vec = W(:,combiner_index);
                 v_vec = F(:,precoder_index);
-                g_effective = (w_vec'*H_chan0*v_vec);
+                g_effective = (w_vec'*squeeze(H_chan_WB(:,:,tap_index))*v_vec);
                 precoder_index_old = precoder_index;
                 combiner_index_old = combiner_index;
             end
@@ -420,15 +473,15 @@ for MCidx = 1:MCtimes
             g_save_debug(nn) = g_effective;
 %             Rx_sig0(nn,path_index) = g_effective * Tx_sig(nn);
         end % end of sample sweeping
-        Rx_sig0_PN(:,path_index) = g_save_debug.' .* Tx_sig_CP;
+        Rx_sig0_PN(:,tap_index) = g_save_debug.' .* Tx_sig_CP;
     end
     
     % ----- summation over all delay tap for freq selective sim --------
     Rx_sig_PN = zeros(burst_length*M,1);
-    for path_index = 1:path_num
-        timewindow0 = (1+pathdelay(path_index)):burst_length*M;
-        timewindow1 = 1:(burst_length*M-pathdelay(path_index));
-        Rx_sig_PN(timewindow0,1) = Rx_sig_PN(timewindow0,1) + Rx_sig0_PN(timewindow1,path_index);
+    for tap_index = 1:tap_max
+        timewindow0 = (1+tapdelay(tap_index)):burst_length*M;
+        timewindow1 = 1:(burst_length*M-tapdelay(tap_index));
+        Rx_sig_PN(timewindow0,1) = Rx_sig_PN(timewindow0,1) + Rx_sig0_PN(timewindow1,tap_index);
     end
     
     % ------- AWGN -------
@@ -511,7 +564,13 @@ for MCidx = 1:MCtimes
         sig_rx_from_dec_sec = zeros(P*M,1);
         for mm=1:M
             index = (mm-1)*P+1:mm*P;
-            index_from_rx_sig = peakindex_H1(ss) + CP + ((mm-1)*Nb:(mm-1)*Nb+P-1);
+            
+            % This line give ideal CP removal
+            index_from_rx_sig = (STO+1) + CP + ((mm-1)*Nb:(mm-1)*Nb+P-1);
+            
+            % This line used estimated STO to remove CP
+%             index_from_rx_sig = peakindex_H1(ss) + CP + ((mm-1)*Nb:(mm-1)*Nb+P-1);
+            
             sig_rx_from_dec(index) = Rx_sig_H1_wSTO(index_from_rx_sig);
             
             % there must be some way for timing est. of sec beam
