@@ -200,7 +200,16 @@ for MCidx = 1:MCtimes
     theta_az = theta0_az(MCidx) + laprnd(path_num, 1, 0, AODspread_az);
     theta_el = theta0_el(MCidx) + laprnd(path_num, 1, 0, AODspread_el);
     
+    % most simple case
     ray_delay = 30e-9 + rand(path_num,1)*tauspread;
+    
+    % mmMAGIC specific intra-cluster delay
+    c_tau = 23; % intra-cluster delay spread with unit [ns]
+    r_tau = 2.03; % parameter in mmMAGIC
+    relative_delay_prime = -r_tau*c_tau*log(rand(path_num,1));
+    relative_delay = sort(relative_delay_prime) - min(relative_delay_prime);
+    delay_pow_scling = exp(-relative_delay*(r_tau-1)./(r_tau*c_tau));
+    ray_delay = (relative_delay+10)*1e-9;
     
     % Find closest AoA/AoD in grid (for debug)
     [~,row_az_true] = min(abs(OMP_grid_rx_az - phi0_az(MCidx)));
@@ -219,7 +228,9 @@ for MCidx = 1:MCtimes
     tap_max = 4;
     tapdelay = 0:(tap_max-1);
     tau_samp(MCidx) = tau/Ts*2*pi;
-    g_ray = exp(1j*rand(path_num,1)*2*pi);
+    
+    % path gain scaled by intra-cluster delay
+    g_ray = exp(1j*rand(path_num,1)*2*pi) .* delay_pow_scling;
     
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     %
