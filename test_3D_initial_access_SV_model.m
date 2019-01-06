@@ -38,7 +38,7 @@ to_est_CFO = 1;                             % Assuming perfect knowledge of CFO 
 max_ite_num = 1e3;                          % Number iteration in refinement steps
 refine_CFO = 1;                             % Turn on refine CFO when coarse estimation of AoA/AoD (long long time!!!)
 
-Nc = 4;                                     % maximum multipath delay in [samples]
+Nc = 7;                                     % maximum multipath delay in [samples]
 STO_max = 500;                             % range of maximum integer offset
 
 CP = 8;                                     % cyclic prefix in [samples]
@@ -176,103 +176,7 @@ Tx_sig_length = length(Tx_sig_CP);          % Num. of samples in M ZC burst (lea
 ZC_t_domain = conj(flipud(seq_1DC));        % ZC sequence used for correlation in Rx
 
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%
-%        QuaDRiGa Parameter and Setup
-%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% Include QuaDRiGa source folder
-addpath('C:\Users\Han\Documents\QuaDriGa_2017.08.01_v2.0.0-664\quadriga_src');
 
-% set(0,'defaultTextFontSize', 18)                        % Default Font Size
-% set(0,'defaultAxesFontSize', 18)                        % Default Font Size
-% set(0,'defaultAxesFontName','Times')                    % Default Font Type
-% set(0,'defaultTextFontName','Times')                    % Default Font Type
-% set(0,'defaultFigurePaperPositionMode','auto')          % Default Plot position
-% set(0,'DefaultFigurePaperType','<custom>')              % Default Paper Type
-% set(0,'DefaultFigurePaperSize',[14.5 7.3])              % Default Paper Size
-
-s = qd_simulation_parameters;                           % New simulation parameters
-s.center_frequency = fc;                                % 28 GHz carrier frequency
-s.sample_density = 4;                                   % 4 samples per half-wavelength
-s.use_absolute_delays = 0;                              % Include delay of the LOS path
-s.show_progress_bars = 0;                               % Disable progress bars
-
-% antenna array setting
-l = qd_layout( s );                                     % New QuaDRiGa layout
-l.tx_array = qd_arrayant('3gpp-mmw',Nt_el,Nt_az,fc,1,0,0.5,1,1);
-l.rx_array = qd_arrayant('3gpp-mmw',Nr_el,Nr_az,fc,1,0,0.5,1,1);
-% l.rx_array.rotate_pattern(180, 'z');
-% l.rx_array.visualize(1);pause(1)
-l.track = qd_track('linear',1,-pi);
-
-% BS and UE location 
-% y_UE = -20 * tan(15/180*pi);
-y_UE = rand * (2 * 20 * tan(30/180*pi)) - (20 * tan(30/180*pi));
-l.tx_position(:,1) = [0,0,25].';                         % 25 m BE height
-l.rx_position(:,1) = [20,y_UE,25].';                     % 25 m BE height
-l.set_scenario('mmMAGIC_UMi_LOS');                       % Set propagation scenario
-% l.set_scenario('3GPP_38.901_UMi_LOS');                 % Set propagation scenario
-% l.visualize;                                             % Plot the layout
-
-% Call builder to generate channel parameter
-cb = l.init_builder;  
-% cb.scenpar.PerClusterDS = 0;                            % Create new builder object
-cb.scenpar.SF_sigma = 0;                                % 0 dB shadow fading
-cb.scenpar.KF_mu = 0;                                   % 0 dB K-Factor
-cb.scenpar.KF_sigma = 0;                                % No KF variation
-cb.scenpar.SubpathMethod = 'mmMAGIC';
-cb.plpar = [];                                          % Disable path loss model
-cb.gen_ssf_parameters;                                  % Generate large- and small-scale fading
-
-% s.use_spherical_waves = 1;                              % Enable drifting (=spherical waves)
-% c = cb.get_channels;                                    % Generate channel coefficients
-% c.individual_delays = 0;                                % Remove per-antenna delays
-
-% Call builder to generate channel 
-s.use_spherical_waves = 0;                              % Disable drifting
-d = cb.get_channels;                                    % Generate channel coefficients
-
-% Rearrange since QuaDRiGa uses different az/el order
-% each column in MIMO is [el1; el2; etc]
-% while ours is [az1, az2, etc].'
-chan_coeff = zeros(Nr,Nt,cb.NumClusters,2);
-for c_idx = 1:cb.NumClusters
-    chan_MIMO_old = squeeze(d.coeff(:,:,c_idx,1));
-    
-    row_order = repmat(1:Nr_el:Nr,1,Nr_el) + kron((0:Nr_el-1),ones(1,Nr_az));
-    col_order = repmat(1:Nt_el:Nt,1,Nt_el) + kron((0:Nt_el-1),ones(1,Nt_az));
-    
-    chan_MIMO_new1 = chan_MIMO_old(:,col_order);
-    chan_MIMO_new2 = chan_MIMO_new1(row_order,:);
-    
-    chan_coeff(:,:,c_idx,1) = chan_MIMO_new2;
-    
-end
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%
-%        Convert into Channel Taps
-%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-H_QDG_f = zeros(Nr,Nt,P);
-H_QDG_t = zeros(Nr,Nt,P);
-
-for pp=1:P
-    for path_idx = 1:cb.NumClusters
-    
-    H_QDG_f(:,:,pp) = H_QDG_f(:,:,pp) +...
-        exp(-1j*2*pi*(10*1e-9+d.delay(path_idx,1))*(pp-1)/(Ts*P))...
-        *squeeze(chan_coeff(:,:,path_idx,1));
-    
-    end
-end
-
-for nt_idx = 1:Nt
-    for nr_idx = 1:Nr
-        H_QDG_t(nr_idx,nt_idx,:) = ifft(H_QDG_f(nr_idx,nt_idx,:));
-    end
-end
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %
@@ -295,45 +199,150 @@ for MCidx = 1:MCtimes
     % Print iteration num.
     clc; fprintf('Monte Carlo Run %d out of %d\n',MCidx, MCtimes);
     
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    %
+    %        QuaDRiGa Parameter and Setup
+    %
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    % Include QuaDRiGa source folder
+    addpath('C:\Users\Han\Documents\QuaDriGa_2017.08.01_v2.0.0-664\quadriga_src');
+
+    % set(0,'defaultTextFontSize', 18)                        % Default Font Size
+    % set(0,'defaultAxesFontSize', 18)                        % Default Font Size
+    % set(0,'defaultAxesFontName','Times')                    % Default Font Type
+    % set(0,'defaultTextFontName','Times')                    % Default Font Type
+    % set(0,'defaultFigurePaperPositionMode','auto')          % Default Plot position
+    % set(0,'DefaultFigurePaperType','<custom>')              % Default Paper Type
+    % set(0,'DefaultFigurePaperSize',[14.5 7.3])              % Default Paper Size
+
+    s = qd_simulation_parameters;                           % New simulation parameters
+    s.center_frequency = fc;                                % 28 GHz carrier frequency
+    s.sample_density = 4;                                   % 4 samples per half-wavelength
+    s.use_absolute_delays = 0;                              % Include delay of the LOS path
+    s.show_progress_bars = 0;                               % Disable progress bars
+
+    % antenna array setting
+    l = qd_layout( s );                                     % New QuaDRiGa layout
+    l.tx_array = qd_arrayant('3gpp-mmw',Nt_el,Nt_az,fc,1,0,0.5,1,1);
+    l.rx_array = qd_arrayant('3gpp-mmw',Nr_el,Nr_az,fc,1,0,0.5,1,1);
+    % l.rx_array.rotate_pattern(180, 'z');
+    % l.rx_array.visualize(1);pause(1)
+    l.track = qd_track('linear',1,-pi);
+
+    % BS and UE location 
+    % y_UE = -20 * tan(15/180*pi);
+    UE_dist = 70;
+    UE_height = rand*50;
+    BS_height = 25;
+    y_UE = rand * (2 * UE_dist * tan(30/180*pi)) - (UE_dist * tan(30/180*pi));
+    l.tx_position(:,1) = [0,0,BS_height].';                  % BS position
+    l.rx_position(:,1) = [UE_dist,y_UE,UE_height].';         % UE position
+    l.set_scenario('mmMAGIC_UMi_NLOS');                       % Set propagation scenario
+    % l.set_scenario('3GPP_38.901_UMi_LOS');                 % Set propagation scenario
+    % l.visualize;                                             % Plot the layout
+
+    % Call builder to generate channel parameter
+    cb = l.init_builder;  
+    % cb.scenpar.PerClusterDS = 0;                            % Create new builder object
+    cb.scenpar.SF_sigma = 0;                                % 0 dB shadow fading
+    cb.scenpar.KF_mu = 0;                                   % 0 dB K-Factor
+    cb.scenpar.KF_sigma = 0;                                % No KF variation
+    cb.scenpar.SubpathMethod = 'mmMAGIC';
+    cb.plpar = [];                                          % Disable path loss model
+    cb.gen_ssf_parameters;                                  % Generate large- and small-scale fading
+
+    % s.use_spherical_waves = 1;                              % Enable drifting (=spherical waves)
+    % c = cb.get_channels;                                    % Generate channel coefficients
+    % c.individual_delays = 0;                                % Remove per-antenna delays
+
+    % Call builder to generate channel 
+    s.use_spherical_waves = 0;                              % Disable drifting
+    d = cb.get_channels;                                    % Generate channel coefficients
+
+    % Rearrange since QuaDRiGa uses different az/el order
+    % each column in MIMO is [el1; el2; etc]
+    % while ours is [az1, az2, etc].'
+    chan_coeff = zeros(Nr,Nt,cb.NumClusters,2);
+    for c_idx = 1:cb.NumClusters
+        chan_MIMO_old = squeeze(d.coeff(:,:,c_idx,1));
+
+        row_order = repmat(1:Nr_el:Nr,1,Nr_el) + kron((0:Nr_el-1),ones(1,Nr_az));
+        col_order = repmat(1:Nt_el:Nt,1,Nt_el) + kron((0:Nt_el-1),ones(1,Nt_az));
+
+        chan_MIMO_new1 = chan_MIMO_old(:,col_order);
+        chan_MIMO_new2 = chan_MIMO_new1(row_order,:);
+
+        chan_coeff(:,:,c_idx,1) = chan_MIMO_new2;
+
+    end
+
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    %
+    %        Convert into Channel Taps
+    %
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    H_QDG_f = zeros(Nr,Nt,P);
+    H_QDG_t = zeros(Nr,Nt,P);
+
+    for pp=1:P
+        for path_idx = 1:cb.NumClusters
+
+        H_QDG_f(:,:,pp) = H_QDG_f(:,:,pp) +...
+            exp(-1j*2*pi*(10*1e-9+d.delay(path_idx,1))*(pp-1)/(Ts*P))...
+            *squeeze(chan_coeff(:,:,path_idx,1));
+
+        end
+    end
+
+    for nt_idx = 1:Nt
+        for nr_idx = 1:Nr
+            H_QDG_t(nr_idx,nt_idx,:) = ifft(H_QDG_f(nr_idx,nt_idx,:));
+        end
+    end
+    
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     %
     %       Channel parameter and related (SV model)
     %
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-    % AoA of rays with disired seperation
+    switch channel_model
+        case 'QuaDRiGa'
+            % phi & theta are not functional unless in SV; Only for debug 
+            phi0_az(MCidx) = cb.AoA(1)+pi;
+            if phi0_az(MCidx)>pi
+                phi0_az(MCidx) = - (2*pi - (cb.AoA(1) + pi));
+            end
+            
+            phi0_el(MCidx) = cb.EoA(1);
+            theta0_az(MCidx) = -cb.AoD(1);
+            theta0_el(MCidx) = -cb.EoD(1);
+        case 'SV'
+            % cluster specific angles
+            phi0_az(MCidx) = (rand*90-45)/180*pi;%0.5236;%20/180*pi;%(rand*90-45)/180*pi;
+            phi0_el(MCidx) = (rand*30-15)/180*pi;%0.2618;%20/180*pi;%(rand*90-45)/180*pi;
+            theta0_az(MCidx) = (rand*90-45)/180*pi;%0.1309;%20/180*pi;%; 0.1309;%
+            theta0_el(MCidx) = (rand*30-15)/180*pi;%0.2618;%0;%%;
+    end
+    
     phi_az = zeros(path_num,1);
     phi_el = zeros(path_num,1);
     
-%     phi0_az(MCidx) = (rand*90-45)/180*pi;%0.5236;%20/180*pi;%(rand*90-45)/180*pi;
-    phi0_az(MCidx) = cb.AoA(1)+pi;
-    if phi0_az(MCidx)>pi
-        phi0_az(MCidx) = - (2*pi - (cb.AoA(1) + pi));
-    end
-    
-%     phi0_el(MCidx) = (rand*30-15)/180*pi;%0.2618;%20/180*pi;%(rand*90-45)/180*pi;
-    phi0_el(MCidx) = cb.EoA(1);
-
+    % AoA of rays 
     phi_az = phi0_az(MCidx) + laprnd(path_num, 1, 0, AOAspread_az);
     phi_el = phi0_el(MCidx) + laprnd(path_num, 1, 0, AOAspread_el);
 
-    % AoD of rays with disired seperation
+    % AoD of rays 
     theta_az = zeros(path_num,1);
     theta_el = zeros(path_num,1);
-
-%     theta0_az(MCidx) = (rand*90-45)/180*pi;%0.1309;%20/180*pi;%; 0.1309;%
-    theta0_az(MCidx) = -cb.AoD(1);
-    
-%     theta0_el(MCidx) = (rand*30-15)/180*pi;%0.2618;%0;%%;
-    theta0_el(MCidx) = -cb.EoD(1);
 
     theta_az = theta0_az(MCidx) + laprnd(path_num, 1, 0, AODspread_az);
     theta_el = theta0_el(MCidx) + laprnd(path_num, 1, 0, AODspread_el);
     
-    % most simple case
-    ray_delay = 30e-9 + rand(path_num,1)*tauspread;
+    % delay spread; most simple case
+%     ray_delay = 30e-9 + rand(path_num,1)*tauspread;
     
-    % mmMAGIC specific intra-cluster delay
+    % delay spread; mmMAGIC specific intra-cluster delay
     c_tau = 23; % intra-cluster delay spread with unit [ns]
     r_tau = 2.03; % parameter in mmMAGIC
     relative_delay_prime = -r_tau*c_tau*log(rand(path_num,1));
@@ -355,7 +364,7 @@ for MCidx = 1:MCtimes
     % Rotate of ray
     tau = rand*(90e-9);
     pathdelay = zeros(path_num,1);
-    tap_max = 4;
+    tap_max = Nc;
     tapdelay = 0:(tap_max-1);
     tau_samp(MCidx) = tau/Ts*2*pi;
     
@@ -1063,11 +1072,10 @@ for MCidx = 1:MCtimes
                         norm(squeeze(chan_coeff(:,:,ll,1)),'fro')^2/(Nt*Nr);
                 end
                 
-        end
+        end % end of channel model switch
         
-        
-    end
-end
+    end % end of SNR sweep
+end % end of Monte Carlo loop
 %% Alignment evaluation
 
 critical_width = 105; % 3dB beam width 105/N [deg]
