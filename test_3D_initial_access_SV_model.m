@@ -7,7 +7,7 @@ rng(3);                                     %random seed
 %-------------------------------------
 % System Parameters
 %-------------------------------------
-path_num = 20;                               % Num of rays in a cluster
+path_num = 20;                              % Num of rays in a cluster
 
 fc = 28e9;                                  % carrier freq [Hz]
 
@@ -17,20 +17,14 @@ Nr_el = 4;                                  % Num of antenna in UE/Rx (elevation
 
 Nt    = 64;                                 % Num of antenna in BS/Tx (total)                           
 Nt_az = 4;                                  % Num of antenna in BS/Tx (azimuth) 
-Nt_el = 16;                                  % Num of antenna in BS/Tx (elevation) 
+Nt_el = 16;                                 % Num of antenna in BS/Tx (elevation) 
 
 M = 64;                                     % Length of SS bursts (IA OFDM symbols)
 MCtimes = 2e1;                              % Num of Monte Carlo Sim.
 
-% mmMAGIC UMi NLOS scene parameter (intra-cluster)
-AOAspread_az = 22.1/180*pi;                 % Intra-cluster AoA spread square 
-AOAspread_el = 10.0/180*pi;                 % Intra-cluster AoA spread RMS 
-AODspread_az = 5.40/180*pi;                 % Intra-cluster AoD spread RMS 
-AODspread_el = 0.30/180*pi;                 % Intra-cluster AoD spread RMS 
-tauspread    = 10e-9;                       % intra-cluster delay spread RMS [second]
 
 SNR_num = 1;                                % Num of Monte Carlo Sim.
-SNR_range = linspace(60,60,SNR_num);
+SNR_range = linspace(60,60,SNR_num);        % SNR range in evaluation
 BW = 57.6e6;                                % IA bandiwdth [Hz]
 Ts = 1/BW;                                  % Sample duration
 Nb = 512;                                   % Sample per SS burst
@@ -47,17 +41,33 @@ refine_CFO = 1;                             % Turn on refine CFO when coarse est
 Nc = 4;                                     % maximum multipath delay in [samples]
 STO_max = 500;                             % range of maximum integer offset
 
-az_lim = pi/3;                              % Az. range limit (by default -60 to 60 deg)
-el_lim = pi/6;                              % El. range limit (by default -30 to 30 deg)
-
 CP = 8;                                     % cyclic prefix in [samples]
 OFDM_sym_num = 4;                           % Num of OFDM in each burst
 burst_N = P * OFDM_sym_num;                 % Num of sample in each SS burst
+channel_model = 'QuaDRiGa';                 % use 'SV' or 'QuaDRiGa' model
 
-%-------------------------------------
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%
+% SV model w. mmMAGIC UMi NLOS scene parameter 
+%  Test intra-cluster setting
+%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+AOAspread_az = 22.1/180*pi;                 % Intra-cluster AoA spread square 
+AOAspread_el = 10.0/180*pi;                 % Intra-cluster AoA spread RMS 
+AODspread_az = 5.40/180*pi;                 % Intra-cluster AoD spread RMS 
+AODspread_el = 0.30/180*pi;                 % Intra-cluster AoD spread RMS 
+tauspread    = 10e-9;                       % intra-cluster delay spread RMS [second]
+
+az_lim = pi/3;                              % Az. range limit (by default -60 to 60 deg)
+el_lim = pi/6;                              % El. range limit (by default -30 to 30 deg)
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%
 % Phase Noise Specification
 % FOM = L(f0,df) + 20log10(df/f0)+10log10(P_VCO)
-%-------------------------------------
+%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 VCO_FOM = -114 + 20*log10(1e6/fc)...
             + 10*log10(27);                 % phase noise FOM -114dBc@1MHz w. 27mW
 P_VCO = 500;                                % Scaling PN var by changing VCO power [mW]
@@ -66,7 +76,11 @@ PN_sigma2 = VCO_c*4*pi^2*fc^2*Ts;           % Time domain variance of PN Wiener 
 PN_sigma = sqrt(PN_sigma2);                 % Weiner process RMS imcrement
 
 
-%-------- CS Dictionary generation -------------
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%
+%           CS Dictionary generation 
+%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 grid_num_r_az = 2 * Nr_az + 1;              % Grid size for AoA Azimuth (2 times Nr_az)
 grid_num_r_el = 2 * Nr_el + 1;              % Grid size for AoA Elevation (2 times Nr_el)
 grid_num_t_az = 2 * Nt_az + 1;              % Grid size for AoD Azimuth (2 times Nt_az)
@@ -142,7 +156,11 @@ F_sec_mat = get_IA_BF_3D(Nt_az, Nt_el,...
                      'sector_FSM_KW', az_lim, el_lim); % Tx beamformer in IA stage
 
 
-% ---- PSS and signal length parameters --------
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%
+%       PSS, CP and signal length parameters
+%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ZC_root = 29;                               % ZC root, a coprime number with ZC length
 ZC_N = 127;                                 % ZC sequence length
 seq = lteZadoffChuSeq(ZC_root,ZC_N);        % Generate ZC sequence
@@ -158,6 +176,109 @@ Tx_sig_length = length(Tx_sig_CP);          % Num. of samples in M ZC burst (lea
 ZC_t_domain = conj(flipud(seq_1DC));        % ZC sequence used for correlation in Rx
 
 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%
+%        QuaDRiGa Parameter and Setup
+%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Include QuaDRiGa source folder
+addpath('C:\Users\Han\Documents\QuaDriGa_2017.08.01_v2.0.0-664\quadriga_src');
+
+% set(0,'defaultTextFontSize', 18)                        % Default Font Size
+% set(0,'defaultAxesFontSize', 18)                        % Default Font Size
+% set(0,'defaultAxesFontName','Times')                    % Default Font Type
+% set(0,'defaultTextFontName','Times')                    % Default Font Type
+% set(0,'defaultFigurePaperPositionMode','auto')          % Default Plot position
+% set(0,'DefaultFigurePaperType','<custom>')              % Default Paper Type
+% set(0,'DefaultFigurePaperSize',[14.5 7.3])              % Default Paper Size
+
+s = qd_simulation_parameters;                           % New simulation parameters
+s.center_frequency = fc;                                % 28 GHz carrier frequency
+s.sample_density = 4;                                   % 4 samples per half-wavelength
+s.use_absolute_delays = 0;                              % Include delay of the LOS path
+s.show_progress_bars = 0;                               % Disable progress bars
+
+% antenna array setting
+l = qd_layout( s );                                     % New QuaDRiGa layout
+l.tx_array = qd_arrayant('3gpp-mmw',Nt_el,Nt_az,fc,1,0,0.5,1,1);
+l.rx_array = qd_arrayant('3gpp-mmw',Nr_el,Nr_az,fc,1,0,0.5,1,1);
+% l.rx_array.rotate_pattern(180, 'z');
+% l.rx_array.visualize(1);pause(1)
+l.track = qd_track('linear',1,-pi);
+
+% BS and UE location 
+% y_UE = -20 * tan(15/180*pi);
+y_UE = rand * (2 * 20 * tan(30/180*pi)) - (20 * tan(30/180*pi));
+l.tx_position(:,1) = [0,0,25].';                         % 25 m BE height
+l.rx_position(:,1) = [20,y_UE,25].';                     % 25 m BE height
+l.set_scenario('mmMAGIC_UMi_LOS');                       % Set propagation scenario
+% l.set_scenario('3GPP_38.901_UMi_LOS');                 % Set propagation scenario
+% l.visualize;                                             % Plot the layout
+
+% Call builder to generate channel parameter
+cb = l.init_builder;  
+% cb.scenpar.PerClusterDS = 0;                            % Create new builder object
+cb.scenpar.SF_sigma = 0;                                % 0 dB shadow fading
+cb.scenpar.KF_mu = 0;                                   % 0 dB K-Factor
+cb.scenpar.KF_sigma = 0;                                % No KF variation
+cb.scenpar.SubpathMethod = 'mmMAGIC';
+cb.plpar = [];                                          % Disable path loss model
+cb.gen_ssf_parameters;                                  % Generate large- and small-scale fading
+
+% s.use_spherical_waves = 1;                              % Enable drifting (=spherical waves)
+% c = cb.get_channels;                                    % Generate channel coefficients
+% c.individual_delays = 0;                                % Remove per-antenna delays
+
+% Call builder to generate channel 
+s.use_spherical_waves = 0;                              % Disable drifting
+d = cb.get_channels;                                    % Generate channel coefficients
+
+% Rearrange since QuaDRiGa uses different az/el order
+% each column in MIMO is [el1; el2; etc]
+% while ours is [az1, az2, etc].'
+chan_coeff = zeros(Nr,Nt,cb.NumClusters,2);
+for c_idx = 1:cb.NumClusters
+    chan_MIMO_old = squeeze(d.coeff(:,:,c_idx,1));
+    
+    row_order = repmat(1:Nr_el:Nr,1,Nr_el) + kron((0:Nr_el-1),ones(1,Nr_az));
+    col_order = repmat(1:Nt_el:Nt,1,Nt_el) + kron((0:Nt_el-1),ones(1,Nt_az));
+    
+    chan_MIMO_new1 = chan_MIMO_old(:,col_order);
+    chan_MIMO_new2 = chan_MIMO_new1(row_order,:);
+    
+    chan_coeff(:,:,c_idx,1) = chan_MIMO_new2;
+    
+end
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%
+%        Convert into Channel Taps
+%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+H_QDG_f = zeros(Nr,Nt,P);
+H_QDG_t = zeros(Nr,Nt,P);
+
+for pp=1:P
+    for path_idx = 1:cb.NumClusters
+    
+    H_QDG_f(:,:,pp) = H_QDG_f(:,:,pp) +...
+        exp(-1j*2*pi*(10*1e-9+d.delay(path_idx,1))*(pp-1)/(Ts*P))...
+        *squeeze(chan_coeff(:,:,path_idx,1));
+    
+    end
+end
+
+for nt_idx = 1:Nt
+    for nr_idx = 1:Nr
+        H_QDG_t(nr_idx,nt_idx,:) = ifft(H_QDG_f(nr_idx,nt_idx,:));
+    end
+end
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%
+%          Matrix Initialization in main loop 
+%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Debug flag used somewhere
 debug_flag = 0;           
 
@@ -184,8 +305,14 @@ for MCidx = 1:MCtimes
     phi_az = zeros(path_num,1);
     phi_el = zeros(path_num,1);
     
-    phi0_az(MCidx) = (rand*90-45)/180*pi;%0.5236;%20/180*pi;%(rand*90-45)/180*pi;
-    phi0_el(MCidx) = (rand*30-15)/180*pi;%0.2618;%20/180*pi;%(rand*90-45)/180*pi;
+%     phi0_az(MCidx) = (rand*90-45)/180*pi;%0.5236;%20/180*pi;%(rand*90-45)/180*pi;
+    phi0_az(MCidx) = cb.AoA(1)+pi;
+    if phi0_az(MCidx)>pi
+        phi0_az(MCidx) = - (2*pi - (cb.AoA(1) + pi));
+    end
+    
+%     phi0_el(MCidx) = (rand*30-15)/180*pi;%0.2618;%20/180*pi;%(rand*90-45)/180*pi;
+    phi0_el(MCidx) = cb.EoA(1);
 
     phi_az = phi0_az(MCidx) + laprnd(path_num, 1, 0, AOAspread_az);
     phi_el = phi0_el(MCidx) + laprnd(path_num, 1, 0, AOAspread_el);
@@ -194,8 +321,11 @@ for MCidx = 1:MCtimes
     theta_az = zeros(path_num,1);
     theta_el = zeros(path_num,1);
 
-    theta0_az(MCidx) = (rand*90-45)/180*pi;%0.1309;%20/180*pi;%; 0.1309;%
-    theta0_el(MCidx) = (rand*30-15)/180*pi;%0.2618;%0;%%;
+%     theta0_az(MCidx) = (rand*90-45)/180*pi;%0.1309;%20/180*pi;%; 0.1309;%
+    theta0_az(MCidx) = -cb.AoD(1);
+    
+%     theta0_el(MCidx) = (rand*30-15)/180*pi;%0.2618;%0;%%;
+    theta0_el(MCidx) = -cb.EoD(1);
 
     theta_az = theta0_az(MCidx) + laprnd(path_num, 1, 0, AODspread_az);
     theta_el = theta0_el(MCidx) + laprnd(path_num, 1, 0, AODspread_el);
@@ -234,10 +364,12 @@ for MCidx = 1:MCtimes
     
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     %
-    %       Test wideband channel in tap domain
+    %       Wideband channel in Tap domain
     %
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    H_chan_WB = get_H_WB_3D(g_ray.',...
+    switch channel_model 
+        case 'SV'
+        H_chan_WB = get_H_WB_3D(g_ray.',...
                             ray_delay.',...
                             phi_az.',...
                             phi_el.',...
@@ -248,9 +380,12 @@ for MCidx = 1:MCtimes
                             Nt_az, Nt_el,...
                             Nr_az, Nr_el,...
                             Ts,P);
-                         
+                                          
+        case 'QuaDRiGa'
+        H_chan_WB = H_QDG_t;
+    end
     
-    % Pre-compute some vectors/matrices
+    % Pre-compute some vectors/matrices (when ideal CP-Removal is used)
     for pathindex = 1:path_num
         
         % Spatial response and its derivative over phi
@@ -270,18 +405,19 @@ for MCidx = 1:MCtimes
     
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     %
-    %       IA PN Sounding BF and related
+    %       IA PN Sounding BF and sensing dictionary
     %
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     
-    % Receiver beamformer: 1) quasi-omni beam from random steering mtx; 2)
-    % directional beam from angle steering vector
+    % Quasi-omni beam from random steering mtx
     probe_Rx_BF = (randi(2,Nr,M)*2-3) + 1j * (randi(2,Nr,M)*2-3);
     W = probe_Rx_BF./norm(probe_Rx_BF,'fro')*sqrt(M);
     
     probe_Tx_BF = (randi(2,Nt,M)*2-3) + 1j * (randi(2,Nt,M)*2-3);
     F = probe_Tx_BF./norm(probe_Tx_BF,'fro')*sqrt(Nt*M);
     
+    % Sensing dictionary - post-BF response for each possible AoA/AoD pair
+    % It has M^2 rows and only M of them are useful
     Measure_mat = kron(transpose(F)*conj(grid_ARV_t),W'*grid_ARV_r);
     
     % Only each pair of m-th column of F and W are useful
@@ -849,7 +985,7 @@ for MCidx = 1:MCtimes
             
             figure
             plot(CFO_est_range,score_test_CFO)
-
+            
         end
 
         % -------- Error Evaluation in beam training of CSIA ---------       
@@ -864,20 +1000,20 @@ for MCidx = 1:MCtimes
         % BF gain analysis (CS approach)
         w_az_data = exp(1j * pi * (0:Nr_az-1)' * sin(bestAOA_az(MCidx,ss)))/sqrt(Nr_az);
         w_el_data = exp(1j * pi * (0:Nr_el-1)' * sin(bestAOA_el(MCidx,ss)))/sqrt(Nr_el);
-        w_data = kron( w_el_data, w_az_data );
+        w_data = kron( w_el_data, w_az_data ); % Post-training Rx Beamformer 
 
         v_az_data = exp(1j * pi * (0:Nt_az-1)' * sin(bestAOD_az(MCidx,ss)))/sqrt(Nt_az);
         v_el_data = exp(1j * pi * (0:Nt_el-1)' * sin(bestAOD_el(MCidx,ss)))/sqrt(Nt_el);
-        v_data = kron( v_el_data, v_az_data );
+        v_data = kron( v_el_data, v_az_data ); % Post-training Tx Beamformer 
         
         % BF gain analysis (sec approach)
         w_az_data_sec = exp(1j * pi * (0:Nr_az-1)' * sin(sec_UE_az_est(MCidx,ss)))/sqrt(Nr_az);
         w_el_data_sec = exp(1j * pi * (0:Nr_el-1)' * sin(sec_UE_el_est(MCidx,ss)))/sqrt(Nr_el);
-        w_data_sec = kron( w_el_data_sec, w_az_data_sec );      
+        w_data_sec = kron( w_el_data_sec, w_az_data_sec ); % Post-training Rx Beamformer     
         
         v_az_data_sec = exp(1j * pi * (0:Nt_az-1)' * sin(sec_BS_az_est(MCidx,ss)))/sqrt(Nt_az);
         v_el_data_sec = exp(1j * pi * (0:Nt_el-1)' * sin(sec_BS_el_est(MCidx,ss)))/sqrt(Nt_el);
-        v_data_sec = kron( v_el_data_sec, v_az_data_sec );
+        v_data_sec = kron( v_el_data_sec, v_az_data_sec ); % Post-training Tx Beamformer 
         
         
         % BF gain analysis (sec w. CSI-RS)
@@ -899,17 +1035,36 @@ for MCidx = 1:MCtimes
         v_el_data_true = exp(1j * pi * (0:Nt_el-1)' * sin(theta0_el(MCidx)))/sqrt(Nt_el);
         v_data_true = kron( v_el_data_true, v_az_data_true );
         
-        for ll=1:path_num
-            data_mag_BF(MCidx,ss) = data_mag_BF(MCidx,ss) +...
-                g_ray(ll) * (w_data'*arx(:,ll)) * conj(v_data'*atx(:,ll));
-            data_mag_sec(MCidx,ss) = data_mag_sec(MCidx,ss) +...
-                g_ray(ll) * (w_data_sec'*arx(:,ll)) * conj(v_data_sec'*atx(:,ll));
-            data_mag_dir(MCidx,ss) = data_mag_dir(MCidx,ss) +...
-                g_ray(ll) * (w_data_dir'*arx(:,ll)) * conj(v_data_dir'*atx(:,ll));
-            data_mag_true(MCidx,ss) = data_mag_true(MCidx,ss) +...
-                g_ray(ll) * (w_data_true'*arx(:,ll)) * conj(v_data_true'*atx(:,ll));
-            data_mag_raw(MCidx,ss) = data_mag_raw(MCidx,ss) + g_ray(ll);
+        % Gain Evaluation
+        switch channel_model
+            case 'SV'
+                for ll=1:path_num
+                    data_mag_BF(MCidx,ss) = data_mag_BF(MCidx,ss) +...
+                        g_ray(ll) * (w_data'*arx(:,ll)) * conj(v_data'*atx(:,ll));
+                    data_mag_sec(MCidx,ss) = data_mag_sec(MCidx,ss) +...
+                        g_ray(ll) * (w_data_sec'*arx(:,ll)) * conj(v_data_sec'*atx(:,ll));
+                    data_mag_dir(MCidx,ss) = data_mag_dir(MCidx,ss) +...
+                        g_ray(ll) * (w_data_dir'*arx(:,ll)) * conj(v_data_dir'*atx(:,ll));
+                    data_mag_true(MCidx,ss) = data_mag_true(MCidx,ss) +...
+                        g_ray(ll) * (w_data_true'*arx(:,ll)) * conj(v_data_true'*atx(:,ll));
+                    data_mag_raw(MCidx,ss) = data_mag_raw(MCidx,ss) + g_ray(ll);
+                end
+            case 'QuaDRiGa'
+                for ll=1:cb.NumClusters
+                    data_mag_BF(MCidx,ss) = data_mag_BF(MCidx,ss) +...
+                        abs(w_data'*squeeze(chan_coeff(:,:,ll,1))*v_data)^2;
+                    data_mag_sec(MCidx,ss) = data_mag_sec(MCidx,ss) +...
+                        abs(w_data_sec'*squeeze(chan_coeff(:,:,ll,1))*v_data_sec)^2;
+                    data_mag_dir(MCidx,ss) = data_mag_dir(MCidx,ss) +...
+                        abs(w_data_dir'*squeeze(chan_coeff(:,:,ll,1))*v_data_dir)^2;
+                    data_mag_true(MCidx,ss) = data_mag_true(MCidx,ss) +...
+                        abs(w_data_true'*squeeze(chan_coeff(:,:,ll,1))*v_data_true)^2;
+                    data_mag_raw(MCidx,ss) = data_mag_raw(MCidx,ss) +...
+                        norm(squeeze(chan_coeff(:,:,ll,1)),'fro')^2/(Nt*Nr);
+                end
+                
         end
+        
         
     end
 end
@@ -957,23 +1112,27 @@ xlabel('SNR (dB)')
 ylabel('Misalignment Rate')
 legend('CSIA, mmMAGIC UMi LOS','DIA, mmMAGIC UMi LOS')
 %% BF gain CDF
+switch channel_model
+    case 'SV'
+    [b_PN,a_PN] = ecdf(20*log10(sqrt(Nt*Nr)*abs(data_mag_BF)./abs(data_mag_raw)));
+    [b_sec,a_sec] = ecdf(20*log10(sqrt(Nt*Nr)*abs(data_mag_sec)./abs(data_mag_raw)));
+    [b_dir,a_dir] = ecdf(20*log10(sqrt(Nt*Nr)*abs(best_g_dir)./abs(data_mag_raw)));
+    [b_true,a_true] = ecdf(20*log10(sqrt(Nt*Nr)*abs(data_mag_true)./abs(data_mag_raw)));
+    case 'QuaDRiGa'
+    [b_PN,a_PN] = ecdf(10*log10(sqrt(Nt*Nr)*abs(data_mag_BF)./abs(data_mag_raw)));
+    [b_sec,a_sec] = ecdf(10*log10(sqrt(Nt*Nr)*abs(data_mag_sec)./abs(data_mag_raw)));
+    [b_dir,a_dir] = ecdf(10*log10(sqrt(Nt*Nr)*abs(best_g_dir)./abs(data_mag_raw)));
+    [b_true,a_true] = ecdf(10*log10(sqrt(Nt*Nr)*abs(data_mag_true)./abs(data_mag_raw)));
+end
 
 figure
-[b,a] = ecdf(20*log10(sqrt(Nt*Nr)*abs(data_mag_BF)./abs(data_mag_raw)));
-plot(a,b,'linewidth',2);hold on
+plot(a_PN,b_PN,'linewidth',2);hold on
+plot(a_sec,b_sec,'linewidth',2);hold on
+plot(a_dir,b_dir,'linewidth',2);hold on
+plot(a_true,b_true,'linewidth',2);hold on
 
-[b,a] = ecdf(20*log10(sqrt(Nt*Nr)*abs(data_mag_sec)./abs(data_mag_raw)));
-plot(a,b,'linewidth',2);hold on
-
-[b,a] = ecdf(20*log10(sqrt(Nt*Nr)*abs(best_g_dir)./abs(data_mag_raw)));
-% [b,a] = ecdf(20*log10(sqrt(Nt*Nr)*abs(data_mag_dir)./abs(data_mag_raw)));
-
-plot(a,b,'linewidth',2);hold on
-
-[b,a] = ecdf(20*log10(sqrt(Nt*Nr)*abs(data_mag_true)./abs(data_mag_raw)));
-plot(a,b,'linewidth',2);hold on
 grid on
-xlim([0,40])
+% xlim([0,40])
 xlabel('BF Gain [dB]')
 ylabel('Prob(Gain<abscissa)')
 legend('Proposed','DIA w/o CSI-RS','DIA w/ CSI-RS','True AoA/AoD')
