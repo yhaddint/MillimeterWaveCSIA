@@ -38,10 +38,10 @@ to_est_CFO = 1;                             % Assuming perfect knowledge of CFO 
 max_ite_num = 1e3;                          % Number iteration in refinement steps
 refine_CFO = 1;                             % Turn on refine CFO when coarse estimation of AoA/AoD (long long time!!!)
 
-Nc = 7;                                     % maximum multipath delay in [samples]
-STO_max = 500;                             % range of maximum integer offset
+Nc = 31;                                    % maximum multipath delay in [samples]
+STO_max = 470;                              % range of maximum integer offset
 
-CP = 8;                                     % cyclic prefix in [samples]
+CP = 32;                                    % cyclic prefix in [samples]
 OFDM_sym_num = 4;                           % Num of OFDM in each burst
 burst_N = P * OFDM_sym_num;                 % Num of sample in each SS burst
 channel_model = 'QuaDRiGa';                 % use 'SV' or 'QuaDRiGa' model
@@ -49,7 +49,7 @@ channel_model = 'QuaDRiGa';                 % use 'SV' or 'QuaDRiGa' model
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %
 % SV model w. mmMAGIC UMi NLOS scene parameter 
-%  Test intra-cluster setting
+%  For intra-cluster setting test
 %
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 AOAspread_az = 22.1/180*pi;                 % Intra-cluster AoA spread square 
@@ -176,8 +176,6 @@ Tx_sig_length = length(Tx_sig_CP);          % Num. of samples in M ZC burst (lea
 ZC_t_domain = conj(flipud(seq_1DC));        % ZC sequence used for correlation in Rx
 
 
-
-
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %
 %          Matrix Initialization in main loop 
@@ -188,6 +186,7 @@ debug_flag = 0;
 
 data_mag_BF = zeros( MCtimes, SNR_num );
 data_mag_sec = zeros( MCtimes, SNR_num );
+data_mag_dir1 = zeros( MCtimes, SNR_num );
 data_mag_dir = zeros( MCtimes, SNR_num );
 data_mag_true = zeros( MCtimes, SNR_num );
 data_mag_raw = zeros( MCtimes, SNR_num );
@@ -204,9 +203,11 @@ for MCidx = 1:MCtimes
     %        QuaDRiGa Parameter and Setup
     %
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    
     % Include QuaDRiGa source folder
     addpath('C:\Users\Han\Documents\QuaDriGa_2017.08.01_v2.0.0-664\quadriga_src');
 
+    % Fonts setting
     % set(0,'defaultTextFontSize', 18)                        % Default Font Size
     % set(0,'defaultAxesFontSize', 18)                        % Default Font Size
     % set(0,'defaultAxesFontName','Times')                    % Default Font Type
@@ -221,7 +222,7 @@ for MCidx = 1:MCtimes
     s.use_absolute_delays = 0;                              % Include delay of the LOS path
     s.show_progress_bars = 0;                               % Disable progress bars
 
-    % antenna array setting
+    % Antenna array setting
     l = qd_layout( s );                                     % New QuaDRiGa layout
     l.tx_array = qd_arrayant('3gpp-mmw',Nt_el,Nt_az,fc,1,0,0.5,1,1);
     l.rx_array = qd_arrayant('3gpp-mmw',Nr_el,Nr_az,fc,1,0,0.5,1,1);
@@ -243,14 +244,19 @@ for MCidx = 1:MCtimes
 
     % Call builder to generate channel parameter
     cb = l.init_builder;  
+    
+    % Some customized setting for debuging
     % cb.scenpar.PerClusterDS = 0;                            % Create new builder object
-    cb.scenpar.SF_sigma = 0;                                % 0 dB shadow fading
-    cb.scenpar.KF_mu = 0;                                   % 0 dB K-Factor
-    cb.scenpar.KF_sigma = 0;                                % No KF variation
-    cb.scenpar.SubpathMethod = 'mmMAGIC';
+%     cb.scenpar.SF_sigma = 0;                                % 0 dB shadow fading
+%     cb.scenpar.KF_mu = 0;                                   % 0 dB K-Factor
+%     cb.scenpar.KF_sigma = 0;                                % No KF variation
+%     cb.scenpar.SubpathMethod = 'mmMAGIC';
     cb.plpar = [];                                          % Disable path loss model
+    
+    % call builder for small scale fading parameters
     cb.gen_ssf_parameters;                                  % Generate large- and small-scale fading
-
+    
+    % Drifting model for channel dynamics (off)
     % s.use_spherical_waves = 1;                              % Enable drifting (=spherical waves)
     % c = cb.get_channels;                                    % Generate channel coefficients
     % c.individual_delays = 0;                                % Remove per-antenna delays
@@ -443,11 +449,11 @@ for MCidx = 1:MCtimes
     
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     %
-    %       Waveform, Phase Error and related
+    %       CFO, Phase Error and related
     %
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     
-    % weighted average
+    % Weights in estimating CFO
     for dd=1:dict_num
         index_new = [abs(Measure_mat_new(1:M-1,dd)),abs(Measure_mat_new(2:M,dd))];
         CFO_weight = min(index_new,[],2);
@@ -455,20 +461,20 @@ for MCidx = 1:MCtimes
         CFO_select(:,dd) = CFO_weight_norm>1/M;
     end
 
-    % ------ Phase noise process -----------
+    % ------ Phase noise process (When Ideal CP-Removal is Used) -----------
     PN_seq = zeros(Nb * M, 1);
     PN_seq(1) = 1;
     for ll=1:length(PN_seq)
         PN_seq(ll+1) = PN_seq(ll).*exp(1j * randn * PN_sigma);
     end
     
-    % ------ About CFO and its derivative --------
+    % ------ About CFO and its derivative (When Ideal CP-Removal is Used) --------
     qvec = exp(1j * (0:P-1)' * eF);
     
     % Received signals (When Ideal CP-Removal is Used)
     symb = [seq;1]; %exp(1j*rand(P,1)*2*pi);
     tau_num = 500;
-    delay_cand = linspace(0,100,tau_num)*1e-9/Ts*2*pi;
+    delay_cand = linspace(0,250,tau_num)*1e-9/Ts*2*pi;
     for tt=1:tau_num
         delay_mtx(:,tt) = DFT'*(exp(-1j * (0:P-1)' * delay_cand(tt) / P).*symb);
     end
@@ -503,7 +509,7 @@ for MCidx = 1:MCtimes
     
     % ------- Precompute for Sector Search (When Nonideal CP-Removal is Used) -------------
     sig_rx_sec2 = zeros(P*M, 1);
-    STO = 100; % timing offset as the sample number
+    STO = randi(50) + 50; % timing offset as the sample number
     
     % received sample number 
     Rx_sig_length = burst_N * M + ZC_N - 1 + STO; % signal length after ZC correlation;
@@ -514,47 +520,8 @@ for MCidx = 1:MCtimes
     %     IA Waveform (Sector Approach, when Nonideal CP-Removal is Used)
     %
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%     for path_index = 1:path_num
-%         % ------- MIMO Channel Generation (for each delay tap)--------
-%         H_chan = get_H_NB_3D(g_ray(path_index),...
-%                              phi_az(path_index),...
-%                              phi_el(path_index),...
-%                              theta_az(path_index),...
-%                              theta_el(path_index),...
-%                              1,...                  % cluster number
-%                              1,...                  % ray number, 1 at a time
-%                              Nt_az, Nt_el,...
-%                              Nr_az, Nr_el);         % Generate discrete time domain frequency-flat channel
-%         H_chan0 = H_chan./norm(H_chan,'fro')*sqrt(Nt*Nr/path_num); % H per multipath
-% 
-%         % ----- sector version received signal generation ------
-%         precoder_index_old = 0;
-%         combiner_index_old = 0;
-%         for nn=1:Tx_sig_length
-% 
-%             precoder_index = floor( (nn-1) / (burst_length*M_burst(2)) )+1;
-%             combiner_index_raw = floor( (nn + STO - 1) / burst_length )+1;
-%             combiner_index = mod(combiner_index_raw-1,M_burst(2))+1;
-% 
-%             if (precoder_index ~= precoder_index_old) || (combiner_index ~= combiner_index_old)
-% 
-%                 w_vec = W_sec_mat(:,combiner_index);
-%                 v_vec = F_sec_mat(:,precoder_index);
-%                 g_effective = (w_vec'*H_chan0*v_vec);
-%                 precoder_index_old = precoder_index;
-%                 combiner_index_old = combiner_index;
-%             end
-% %             index_debug(:,nn) = [precoder_index;combiner_index];
-%             g_save_debug(nn) = g_effective;
-% %             Rx_sig0(nn,path_index) = g_effective * Tx_sig(nn);
-%         end % end of sample sweeping
-%         Rx_sig0_sec(:,path_index) = g_save_debug.' .* Tx_sig_CP;
-%     end
     
     for tap_index = 1:tap_max
-        % ------- MIMO Channel Generation (for each delay tap)--------
-
-%         H_chan0 = H_chan./norm(H_chan,'fro')*sqrt(Nt*Nr/path_num); % H per multipath
 
         % ----- sector version received signal generation ------
         precoder_index_old = 0;
@@ -589,24 +556,22 @@ for MCidx = 1:MCtimes
         Rx_sig_sec(timewindow0,1) = Rx_sig_sec(timewindow0,1) + Rx_sig0_sec(timewindow1,tap_index);
     end
     
+    % ------ Phase noise process (PN can be confusing) -----------
+    PE_sec = zeros(burst_length*M-1, 1);
+    PE_sec(1) = 1;
+    for ll=1:length(PE_sec)
+        PE_sec(ll+1) = PE_sec(ll).*exp(1j * randn * PN_sigma);
+    end
+    
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     %
     %     IA waveform (PN approach, when Nonideal CP-Removal is Used)
     %
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    
+    % mtx to take moving average over Nc samples in Energy Detection
     Nc_acc_mtx = toeplitz([1,zeros(1,burst_length-Nc)]',[ones(1,Nc),zeros(1,burst_length-Nc)]);
     
-        % ------- Channel Generation --------
-%         H_chan = get_H_NB_3D(g_ray(path_index),...
-%                              phi_az(path_index),...
-%                              phi_el(path_index),...
-%                              theta_az(path_index),...
-%                              theta_el(path_index),...
-%                              1,...                  % cluster number
-%                              1,...                  % ray number, 1 at a time
-%                              Nt_az, Nt_el,...
-%                              Nr_az, Nr_el);         % Generate discrete time domain frequency-flat channel
-%         H_chan0 = H_chan./norm(H_chan,'fro')*sqrt(Nt*Nr/path_num); % H per multipath
     for tap_index = 1:tap_max
         % ----- sector version received signal generation ------
         precoder_index_old = 0;
@@ -640,6 +605,13 @@ for MCidx = 1:MCtimes
         Rx_sig_PN(timewindow0,1) = Rx_sig_PN(timewindow0,1) + Rx_sig0_PN(timewindow1,tap_index);
     end
     
+    % ------ Phase noise process (PN can be confusing) -----------
+    PE_CS = zeros(burst_length*M-1, 1);
+    PE_CS(1) = 1;
+    for ll=1:length(PE_CS)
+        PE_CS(ll+1) = PE_CS(ll).*exp(1j * randn * PN_sigma);
+    end
+    
     % ------- AWGN -------
     noise_CP = (randn(Tx_sig_length,1)+1j*randn(Tx_sig_length,1))/sqrt(2);
     noise_at_STO = (randn(STO,1)+1j*randn(STO,1))/sqrt(2);
@@ -663,12 +635,13 @@ for MCidx = 1:MCtimes
         noise_pow = 10^(-SNR_range(ss)/10);
         awgn_CP = noise_CP * sqrt(noise_pow);
         
-        % case 'sector'
-        Rx_sig_H1_sec = Rx_sig_sec.*exp(1j*CFO_samp*(0:length(Rx_sig_sec)-1).') + awgn_CP ;
+        % case 'sector beamformer'
+        Rx_sig_H1_sec = Rx_sig_sec.*...
+            PE_sec .* exp(1j*CFO_samp*(0:length(Rx_sig_sec)-1).') + awgn_CP ;
         Rx_sig_H0_sec = awgn_CP;
         
-        % case 'PN'
-        Rx_sig_H1 = Rx_sig_PN.*exp(1j*CFO_samp*(0:length(Rx_sig_PN)-1).') + awgn_CP ;
+        % case 'PN beamformer'
+        Rx_sig_H1 = Rx_sig_PN.*PE_CS.*exp(1j*CFO_samp*(0:length(Rx_sig_PN)-1).') + awgn_CP ;
         Rx_sig_H0 = awgn_CP;
 
         % ------ T Domain ZC Correlation -------
@@ -722,10 +695,10 @@ for MCidx = 1:MCtimes
             index = (mm-1)*P+1:mm*P;
             
             % This line give ideal CP removal
-            index_from_rx_sig = (STO+1) + CP + ((mm-1)*Nb:(mm-1)*Nb+P-1);
+%             index_from_rx_sig = (STO+1) + CP + ((mm-1)*Nb:(mm-1)*Nb+P-1);
             
             % This line used estimated STO to remove CP
-%             index_from_rx_sig = peakindex_H1(ss) + CP + ((mm-1)*Nb:(mm-1)*Nb+P-1);
+            index_from_rx_sig = peakindex_H1(ss) + CP + ((mm-1)*Nb:(mm-1)*Nb+P-1);
             
             sig_rx_from_dec(index) = Rx_sig_H1_wSTO(index_from_rx_sig);
             
@@ -770,55 +743,156 @@ for MCidx = 1:MCtimes
         
         %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
         %
-        %     Fine BF Training w. CSI-RS (Sector Approach)
+        %     #1 Stage Fine BF Training w. CSI-RS (Sector Approach)
         %
         %   CSI-RS frame is not sim-ed since it is not emphasis of paper
         %
         %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
         fine_idx = 1;
-        BS_az_fine_num = 3;
-        BS_el_fine_num = 3;
+        BS_az_fine1_num = 3;
+        BS_el_fine1_num = 3;
+        BS_fine1_num = BS_az_fine1_num * BS_el_fine1_num;
+        
+        % This number is picked in arbitary way; Can definitely be better
+        BS_el_dir1_step = BS_el_grid_step/2;
+        BS_az_dir1_step = BS_az_grid_step/2;
+        
+        UE_az_fine1_num = 3;
+        UE_el_fine1_num = 3;
+        UE_fine1_num = UE_az_fine1_num * UE_el_fine1_num;
+        
+        % This number is picked in arbitary way; Can definitely be better
+        UE_el_dir1_step = UE_el_grid_step/2;
+        UE_az_dir1_step = UE_az_grid_step/2;
+        
+        RSSI1 = zeros(UE_fine1_num * BS_fine1_num,1);
+
+        for BS_el_fine1_idx = 1:BS_el_fine1_num
+            BS_dir1_el = sec_BS_el_est(MCidx,ss) + (BS_el_fine1_idx-1) * BS_el_dir1_step;
+            BS_dir1_el_vec = exp(1j*pi*(0:(Nt_el-1)).'*sin(BS_dir1_el))/sqrt(Nt_el);
+
+            for BS_az_fine1_idx = 1:BS_az_fine1_num
+                BS_dir1_az = sec_BS_az_est(MCidx,ss) + (BS_az_fine1_idx-1) * BS_az_dir1_step;
+                BS_dir1_az_vec = exp(1j*pi*(0:(Nt_az-1)).'*sin(BS_dir1_az))/sqrt(Nt_az);
+                
+                for UE_el_fine1_idx = 1:UE_el_fine1_num
+                    UE_dir1_el = sec_UE_el_est(MCidx,ss) + (UE_el_fine1_idx-1) * UE_el_dir1_step;
+                    UE_dir1_el_vec = exp(1j*pi*(0:(Nr_el-1)).'*sin(UE_dir1_el))/sqrt(Nr_el);
+
+                    for UE_az_fine1_idx = 1:UE_az_fine1_num
+                        UE_dir1_az = sec_UE_az_est(MCidx,ss) + (UE_az_fine1_idx-1) * UE_az_dir1_step;
+                        UE_dir1_az_vec = exp(1j*pi*(0:(Nr_az-1)).'*sin(UE_dir1_az))/sqrt(Nr_az); 
+                
+                        BS_dir1_vec = kron( BS_dir1_el_vec, BS_dir1_az_vec );
+                        UE_dir1_vec = kron( UE_dir1_el_vec, UE_dir1_az_vec );
+                        
+                        % Evaluating RSSI
+                        switch channel_model
+                            case 'QuaDRiGa'
+                                for ll = 1:path_num
+                                    RSSI1(fine_idx) = RSSI1(fine_idx) + ...
+                                        abs(UE_dir1_vec'*squeeze(chan_coeff(:,:,ll,1))*BS_dir1_vec)^2;
+                                end
+                            case 'SV'
+                                for ll = 1:path_num
+                                    RSSI1(fine_idx) = RSSI1(fine_idx) + g_ray(ll) * (UE_dir1_vec'*arx(:,ll)) ...
+                                    * conj(BS_dir1_vec'*atx(:,ll));
+                                end
+                        end
+                        fine_idx = fine_idx + 1;
+                        
+                    end
+                end
+            end
+        end
+        
+        [best_g_dir1(MCidx,ss), best_fine1_idx] = max(abs(RSSI1));
+        
+        best_BS_dir1_idx = floor((best_fine1_idx-1)/UE_fine1_num) + 1;
+        best_UE_dir1_idx = best_fine1_idx - (best_BS_dir1_idx-1) * UE_fine1_num;
+        
+        best_BS_dir1_el_idx = floor((best_BS_dir1_idx-1)/BS_az_fine1_num) + 1;
+        best_BS_dir1_az_idx = best_BS_dir1_idx - (best_BS_dir1_el_idx-1) * BS_az_fine1_num;
+        
+        best_UE_dir1_el_idx = floor((best_UE_dir1_idx-1)/UE_az_fine1_num) + 1;
+        best_UE_dir1_az_idx = best_UE_dir1_idx - (best_UE_dir1_el_idx-1) * UE_az_fine1_num;
+        
+        best_UE_dir1_el(MCidx,ss) = sec_UE_el_est(MCidx,ss) +...
+                                    (best_UE_dir1_el_idx-1) * UE_el_dir1_step;
+        best_UE_dir1_az(MCidx,ss) = sec_UE_az_est(MCidx,ss) +...
+                                    (best_UE_dir1_az_idx-1) * UE_az_dir1_step;
+        best_BS_dir1_el(MCidx,ss) = sec_BS_el_est(MCidx,ss) +...
+                                    (best_BS_dir1_el_idx-1) * BS_el_dir1_step;
+        best_BS_dir1_az(MCidx,ss) = sec_BS_az_est(MCidx,ss) +...
+                                    (best_BS_dir1_az_idx-1) * BS_az_dir1_step;
+
+
+        % Error Evaluation
+        AOA_az_error_dir1(MCidx,ss) = abs(best_UE_dir1_az(MCidx,ss) - phi0_az(MCidx));
+        AOA_el_error_dir1(MCidx,ss) = abs(best_UE_dir1_el(MCidx,ss) - phi0_el(MCidx));
+        AOD_az_error_dir1(MCidx,ss) = abs(best_BS_dir1_az(MCidx,ss) - theta0_az(MCidx));
+        AOD_el_error_dir1(MCidx,ss) = abs(best_BS_dir1_el(MCidx,ss) - theta0_el(MCidx));
+        
+        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        %
+        %     #2 Stage Fine BF Training w. CSI-RS (Sector Approach)
+        %
+        %   CSI-RS frame is not sim-ed since it is not emphasis of paper
+        %
+        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        fine_idx = 1;
+        BS_az_fine_num = 5;
+        BS_el_fine_num = 5;
         BS_fine_num = BS_az_fine_num * BS_el_fine_num;
         
         % This number is picked in arbitary way; Can definitely be better
-        BS_el_dir_step = BS_el_grid_step/2;
-        BS_az_dir_step = BS_az_grid_step/2;
+        BS_el_dir_step = BS_el_grid_step/4;
+        BS_az_dir_step = BS_az_grid_step/4;
         
-        UE_az_fine_num = 3;
-        UE_el_fine_num = 3;
+        UE_az_fine_num = 5;
+        UE_el_fine_num = 5;
         UE_fine_num = UE_az_fine_num * UE_el_fine_num;
         
         % This number is picked in arbitary way; Can definitely be better
-        UE_el_dir_step = UE_el_grid_step/2;
-        UE_az_dir_step = UE_az_grid_step/2;
+        UE_el_dir_step = UE_el_grid_step/4;
+        UE_az_dir_step = UE_az_grid_step/4;
         
         RSSI = zeros(UE_fine_num * BS_fine_num,1);
 
         for BS_el_fine_idx = 1:BS_el_fine_num
-            BS_dir_el = sec_BS_el_est(MCidx,ss) + (BS_el_fine_idx-1) * BS_el_dir_step;
+            BS_dir_el = sec_BS_el_est(MCidx,ss) + (BS_el_fine_idx-3) * BS_el_dir_step;
             BS_dir_el_vec = exp(1j*pi*(0:(Nt_el-1)).'*sin(BS_dir_el))/sqrt(Nt_el);
 
             for BS_az_fine_idx = 1:BS_az_fine_num
-                BS_dir_az = sec_BS_az_est(MCidx,ss) + (BS_az_fine_idx-1) * BS_az_dir_step;
+                BS_dir_az = sec_BS_az_est(MCidx,ss) + (BS_az_fine_idx-3) * BS_az_dir_step;
                 BS_dir_az_vec = exp(1j*pi*(0:(Nt_az-1)).'*sin(BS_dir_az))/sqrt(Nt_az);
                 
                 for UE_el_fine_idx = 1:UE_el_fine_num
-                    UE_dir_el = sec_UE_el_est(MCidx,ss) + (UE_el_fine_idx-1) * UE_el_dir_step;
+                    UE_dir_el = sec_UE_el_est(MCidx,ss) + (UE_el_fine_idx-3) * UE_el_dir_step;
                     UE_dir_el_vec = exp(1j*pi*(0:(Nr_el-1)).'*sin(UE_dir_el))/sqrt(Nr_el);
 
                     for UE_az_fine_idx = 1:UE_az_fine_num
-                        UE_dir_az = sec_UE_az_est(MCidx,ss) + (UE_az_fine_idx-1) * UE_az_dir_step;
+                        UE_dir_az = sec_UE_az_est(MCidx,ss) + (UE_az_fine_idx-3) * UE_az_dir_step;
                         UE_dir_az_vec = exp(1j*pi*(0:(Nr_az-1)).'*sin(UE_dir_az))/sqrt(Nr_az); 
                 
                         BS_dir_vec = kron( BS_dir_el_vec, BS_dir_az_vec );
                         UE_dir_vec = kron( UE_dir_el_vec, UE_dir_az_vec );
                         
                         % Evaluating RSSI
-                        for ll = 1:path_num
-                            RSSI(fine_idx) = RSSI(fine_idx) + g_ray(ll) * (UE_dir_vec'*arx(:,ll)) ...
-                            * conj(BS_dir_vec'*atx(:,ll));
+                        switch channel_model
+                            case 'QuaDRiGa'
+                                for ll = 1:path_num
+                                    RSSI(fine_idx) = RSSI(fine_idx) + ...
+                                        abs(UE_dir_vec'*squeeze(chan_coeff(:,:,ll,1))*BS_dir_vec)^2;
+                                end
+                            case 'SV'
+                                for ll = 1:path_num
+                                    RSSI(fine_idx) = RSSI(fine_idx) + g_ray(ll) * (UE_dir_vec'*arx(:,ll)) ...
+                                    * conj(BS_dir_vec'*atx(:,ll));
+                                end
                         end
                         fine_idx = fine_idx + 1;
+                        
                     end
                 end
             end
@@ -836,13 +910,13 @@ for MCidx = 1:MCtimes
         best_UE_dir_az_idx = best_UE_dir_idx - (best_UE_dir_el_idx-1) * UE_az_fine_num;
         
         best_UE_dir_el(MCidx,ss) = sec_UE_el_est(MCidx,ss) +...
-                                    (best_UE_dir_el_idx-1) * UE_el_dir_step;
+                                    (best_UE_dir_el_idx-3) * UE_el_dir_step;
         best_UE_dir_az(MCidx,ss) = sec_UE_az_est(MCidx,ss) +...
-                                    (best_UE_dir_az_idx-1) * UE_az_dir_step;
+                                    (best_UE_dir_az_idx-3) * UE_az_dir_step;
         best_BS_dir_el(MCidx,ss) = sec_BS_el_est(MCidx,ss) +...
-                                    (best_BS_dir_el_idx-1) * BS_el_dir_step;
+                                    (best_BS_dir_el_idx-3) * BS_el_dir_step;
         best_BS_dir_az(MCidx,ss) = sec_BS_az_est(MCidx,ss) +...
-                                    (best_BS_dir_az_idx-1) * BS_az_dir_step;
+                                    (best_BS_dir_az_idx-3) * BS_az_dir_step;
 
 
         % Error Evaluation
@@ -1025,7 +1099,16 @@ for MCidx = 1:MCtimes
         v_data_sec = kron( v_el_data_sec, v_az_data_sec ); % Post-training Tx Beamformer 
         
         
-        % BF gain analysis (sec w. CSI-RS)
+        % BF gain analysis (sec w. CSI-RS #1 stage)
+        w_az_data_dir1 = exp(1j * pi * (0:Nr_az-1)' * sin(best_UE_dir1_az(MCidx,ss)))/sqrt(Nr_az);
+        w_el_data_dir1 = exp(1j * pi * (0:Nr_el-1)' * sin(best_UE_dir1_el(MCidx,ss)))/sqrt(Nr_el);
+        w_data_dir1 = kron( w_el_data_dir1, w_az_data_dir1 );
+        
+        v_az_data_dir1 = exp(1j * pi * (0:Nt_az-1)' * sin(best_BS_dir1_az(MCidx,ss)))/sqrt(Nt_az);
+        v_el_data_dir1 = exp(1j * pi * (0:Nt_el-1)' * sin(best_BS_dir1_el(MCidx,ss)))/sqrt(Nt_el);
+        v_data_dir1 = kron( v_el_data_dir1, v_az_data_dir1 );
+        
+        % BF gain analysis (sec w. CSI-RS #2 stage)
         w_az_data_dir = exp(1j * pi * (0:Nr_az-1)' * sin(best_UE_dir_az(MCidx,ss)))/sqrt(Nr_az);
         w_el_data_dir = exp(1j * pi * (0:Nr_el-1)' * sin(best_UE_dir_el(MCidx,ss)))/sqrt(Nr_el);
         w_data_dir = kron( w_el_data_dir, w_az_data_dir );
@@ -1052,6 +1135,8 @@ for MCidx = 1:MCtimes
                         g_ray(ll) * (w_data'*arx(:,ll)) * conj(v_data'*atx(:,ll));
                     data_mag_sec(MCidx,ss) = data_mag_sec(MCidx,ss) +...
                         g_ray(ll) * (w_data_sec'*arx(:,ll)) * conj(v_data_sec'*atx(:,ll));
+                    data_mag_dir1(MCidx,ss) = data_mag_dir1(MCidx,ss) +...
+                        g_ray(ll) * (w_data_dir1'*arx(:,ll)) * conj(v_data_dir1'*atx(:,ll));
                     data_mag_dir(MCidx,ss) = data_mag_dir(MCidx,ss) +...
                         g_ray(ll) * (w_data_dir'*arx(:,ll)) * conj(v_data_dir'*atx(:,ll));
                     data_mag_true(MCidx,ss) = data_mag_true(MCidx,ss) +...
@@ -1064,6 +1149,8 @@ for MCidx = 1:MCtimes
                         abs(w_data'*squeeze(chan_coeff(:,:,ll,1))*v_data)^2;
                     data_mag_sec(MCidx,ss) = data_mag_sec(MCidx,ss) +...
                         abs(w_data_sec'*squeeze(chan_coeff(:,:,ll,1))*v_data_sec)^2;
+                    data_mag_dir1(MCidx,ss) = data_mag_dir1(MCidx,ss) +...
+                        abs(w_data_dir1'*squeeze(chan_coeff(:,:,ll,1))*v_data_dir1)^2;
                     data_mag_dir(MCidx,ss) = data_mag_dir(MCidx,ss) +...
                         abs(w_data_dir'*squeeze(chan_coeff(:,:,ll,1))*v_data_dir)^2;
                     data_mag_true(MCidx,ss) = data_mag_true(MCidx,ss) +...
@@ -1078,14 +1165,19 @@ for MCidx = 1:MCtimes
 end % end of Monte Carlo loop
 %% Alignment evaluation
 
-critical_width = 105; % 3dB beam width 105/N [deg]
+critical_width = 55; % 3dB beam width 105/N [deg]
 
 for ss=1:SNR_num
-AOA_az_align_comp_mean(ss) = sum((AOA_az_error_comp(:,ss)/pi*180)<(critical_width/Nr_az),1)/MCtimes;
-AOA_el_align_comp_mean(ss) = sum((AOA_el_error_comp(:,ss)/pi*180)<(critical_width/Nr_el),1)/MCtimes;
+% AOA_az_align_comp_mean(ss) = sum((AOA_az_error_comp(:,ss)/pi*180)<(critical_width/Nr_az),1)/MCtimes;
+% AOA_el_align_comp_mean(ss) = sum((AOA_el_error_comp(:,ss)/pi*180)<(critical_width/Nr_el),1)/MCtimes;
+% AOD_az_align_comp_mean(ss) = sum((AOD_az_error_comp(:,ss)/pi*180)<(critical_width/Nt_az),1)/MCtimes;
+% AOD_el_align_comp_mean(ss) = sum((AOD_el_error_comp(:,ss)/pi*180)<(critical_width/Nt_el),1)/MCtimes;
 
-AOD_az_align_comp_mean(ss) = sum((AOD_az_error_comp(:,ss)/pi*180)<(critical_width/Nt_az),1)/MCtimes;
-AOD_el_align_comp_mean(ss) = sum((AOD_el_error_comp(:,ss)/pi*180)<(critical_width/Nt_el),1)/MCtimes;
+AOA_az_align_dir_mean(ss) = sum((AOA_az_error_dir(:,ss)/pi*180)<(critical_width/Nr_az),1)/MCtimes;
+AOA_el_align_dir_mean(ss) = sum((AOA_el_error_dir(:,ss)/pi*180)<(critical_width/Nr_el),1)/MCtimes;
+AOD_az_align_dir_mean(ss) = sum((AOD_az_error_dir(:,ss)/pi*180)<(critical_width/Nt_az),1)/MCtimes;
+AOD_el_align_dir_mean(ss) = sum((AOD_el_error_dir(:,ss)/pi*180)<(critical_width/Nt_el),1)/MCtimes;
+
 
 Align_comp_mean(ss) = sum(((AOD_az_error_comp(:,ss)/pi*180)<(critical_width/Nt_az)&...
                            (AOD_el_error_comp(:,ss)/pi*180)<(critical_width/Nt_el)&...
@@ -1100,10 +1192,15 @@ Align_sec_mean(ss) = sum((( AOD_az_error_sec(:,ss)/pi*180)<(critical_width/Nt_az
 end
 
 figure
-plot(SNR_range,AOA_az_align_comp_mean,'-s','linewidth',2);hold on
-plot(SNR_range,AOA_el_align_comp_mean,'-s','linewidth',2);hold on
-plot(SNR_range,AOD_az_align_comp_mean,'-s','linewidth',2);hold on
-plot(SNR_range,AOD_el_align_comp_mean,'-s','linewidth',2);hold on
+% plot(SNR_range,AOA_az_align_comp_mean,'-s','linewidth',2);hold on
+% plot(SNR_range,AOA_el_align_comp_mean,'-s','linewidth',2);hold on
+% plot(SNR_range,AOD_az_align_comp_mean,'-s','linewidth',2);hold on
+% plot(SNR_range,AOD_el_align_comp_mean,'-s','linewidth',2);hold on
+
+plot(SNR_range,AOA_az_align_dir_mean,'-s','linewidth',2);hold on
+plot(SNR_range,AOA_el_align_dir_mean,'-s','linewidth',2);hold on
+plot(SNR_range,AOD_az_align_dir_mean,'-s','linewidth',2);hold on
+plot(SNR_range,AOD_el_align_dir_mean,'-s','linewidth',2);hold on
 grid on
 xlabel('SNR (dB)')
 ylabel('Misalignment Rate')
@@ -1124,23 +1221,25 @@ switch channel_model
     case 'SV'
     [b_PN,a_PN] = ecdf(20*log10(sqrt(Nt*Nr)*abs(data_mag_BF)./abs(data_mag_raw)));
     [b_sec,a_sec] = ecdf(20*log10(sqrt(Nt*Nr)*abs(data_mag_sec)./abs(data_mag_raw)));
-    [b_dir,a_dir] = ecdf(20*log10(sqrt(Nt*Nr)*abs(best_g_dir)./abs(data_mag_raw)));
+    [b_dir,a_dir] = ecdf(20*log10(sqrt(Nt*Nr)*abs(data_mag_dir)./abs(data_mag_raw)));
     [b_true,a_true] = ecdf(20*log10(sqrt(Nt*Nr)*abs(data_mag_true)./abs(data_mag_raw)));
     case 'QuaDRiGa'
-    [b_PN,a_PN] = ecdf(10*log10(sqrt(Nt*Nr)*abs(data_mag_BF)./abs(data_mag_raw)));
-    [b_sec,a_sec] = ecdf(10*log10(sqrt(Nt*Nr)*abs(data_mag_sec)./abs(data_mag_raw)));
-    [b_dir,a_dir] = ecdf(10*log10(sqrt(Nt*Nr)*abs(best_g_dir)./abs(data_mag_raw)));
-    [b_true,a_true] = ecdf(10*log10(sqrt(Nt*Nr)*abs(data_mag_true)./abs(data_mag_raw)));
+    [b_PN,a_PN] = ecdf(10*log10(sqrt(1)*abs(data_mag_BF)./abs(1)));
+    [b_sec,a_sec] = ecdf(10*log10(sqrt(1)*abs(data_mag_sec)./abs(1)));
+    [b_dir1,a_dir1] = ecdf(10*log10(sqrt(1)*abs(data_mag_dir1)./abs(1)));
+    [b_dir,a_dir] = ecdf(10*log10(sqrt(1)*abs(data_mag_dir)./abs(1)));
+    [b_true,a_true] = ecdf(10*log10(sqrt(1)*abs(data_mag_true)./abs(1)));
 end
 
 figure
 plot(a_PN,b_PN,'linewidth',2);hold on
 plot(a_sec,b_sec,'linewidth',2);hold on
+plot(a_dir1,b_dir1,'linewidth',2);hold on
 plot(a_dir,b_dir,'linewidth',2);hold on
 plot(a_true,b_true,'linewidth',2);hold on
 
 grid on
-% xlim([0,40])
+xlim([20,50])
 xlabel('BF Gain [dB]')
 ylabel('Prob(Gain<abscissa)')
-legend('Proposed','DIA w/o CSI-RS','DIA w/ CSI-RS','True AoA/AoD')
+legend('Proposed','DIA w/o CSI-RS','DIA w/ 1 CSI-RS','DIA w/ 2 CSI-RS','True AoA/AoD')
