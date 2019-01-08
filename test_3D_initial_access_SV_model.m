@@ -3,7 +3,6 @@
 %-------------------------------------
 clear;clc;
 rng(3);                                     %random seed
-% load probe_BF
 %-------------------------------------
 % System Parameters
 %-------------------------------------
@@ -20,9 +19,11 @@ Nt_az = 4;                                  % Num of antenna in BS/Tx (azimuth)
 Nt_el = 16;                                 % Num of antenna in BS/Tx (elevation) 
 
 M = 64;                                     % Length of SS bursts (IA OFDM symbols)
-MCtimes = 2e1;                              % Num of Monte Carlo Sim.
+MCtimes = 2e2;                              % Num of Monte Carlo Sim.
 
-
+BW_data = 400e6;                            % noise BW in evalution SNR of data stage
+NF = 4;                                     % Receiver Noise Figure in [dB]
+Tx_pow_dBW = 16;                            % Transmit power in [dBW], i.e., 46dBm - 30dB
 SNR_num = 1;                                % Num of Monte Carlo Sim.
 SNR_range = linspace(60,60,SNR_num);        % SNR range in evaluation
 BW = 57.6e6;                                % IA bandiwdth [Hz]
@@ -46,6 +47,12 @@ OFDM_sym_num = 4;                           % Num of OFDM in each burst
 burst_N = P * OFDM_sym_num;                 % Num of sample in each SS burst
 channel_model = 'QuaDRiGa';                 % use 'SV' or 'QuaDRiGa' model
 
+
+% Genie detection threshold from running H0 scenario
+% Here I've used predefined value to save time
+% [CS_TH, sec_TH] = get_Genie_Detection_TH();
+CS_TH = 1.5397e-13;
+sec_TH = 6.9196e-14;
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %
 % SV model w. mmMAGIC UMi NLOS scene parameter 
@@ -61,7 +68,6 @@ tauspread    = 10e-9;                       % intra-cluster delay spread RMS [se
 az_lim = pi/3;                              % Az. range limit (by default -60 to 60 deg)
 el_lim = pi/6;                              % El. range limit (by default -30 to 30 deg)
 
-
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %
 % Phase Noise Specification
@@ -74,7 +80,6 @@ P_VCO = 500;                                % Scaling PN var by changing VCO pow
 VCO_c = 10^(VCO_FOM/10)/P_VCO;              % parameter c in PN specs
 PN_sigma2 = VCO_c*4*pi^2*fc^2*Ts;           % Time domain variance of PN Wiener process
 PN_sigma = sqrt(PN_sigma2);                 % Weiner process RMS imcrement
-
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %
@@ -201,6 +206,7 @@ for MCidx = 1:MCtimes
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     %
     %        QuaDRiGa Parameter and Setup
+    %     It uses QuaDRiGa Tutorial 4.3 as baseline
     %
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     
@@ -231,29 +237,31 @@ for MCidx = 1:MCtimes
     l.track = qd_track('linear',1,-pi);
 
     % BS and UE location 
-    % y_UE = -20 * tan(15/180*pi);
-    UE_dist = 70;
-    UE_height = rand*50;
-    BS_height = 25;
-    y_UE = rand * (2 * UE_dist * tan(30/180*pi)) - (UE_dist * tan(30/180*pi));
+    UE_dist = 70;                                            % BS/UE distance in x-axis
+    UE_height = rand*20;                                     % Height of UE (up to 50m)
+    BS_UE_pos_angle = (rand*90-45)/180*pi;
+    x_UE = UE_dist * cos(BS_UE_pos_angle);
+%     y_UE = UE_dist * sin(BS_UE_pos_angle);
+    BS_height = 10;                                          % Height of BS
+    y_UE = rand * (2 * UE_dist * tan(45/180*pi))...
+        - (UE_dist * tan(45/180*pi));                        % BS/UE dist in y axis(ramdom)
     l.tx_position(:,1) = [0,0,BS_height].';                  % BS position
     l.rx_position(:,1) = [UE_dist,y_UE,UE_height].';         % UE position
-    l.set_scenario('mmMAGIC_UMi_NLOS');                       % Set propagation scenario
-    % l.set_scenario('3GPP_38.901_UMi_LOS');                 % Set propagation scenario
-    % l.visualize;                                             % Plot the layout
+    l.set_scenario('mmMAGIC_UMi_NLOS');                      % Set propagation scenario
+%     l.visualize;                                           % Plot the layout
 
     % Call builder to generate channel parameter
     cb = l.init_builder;  
     
-    % Some customized setting for debuging
+    % Some customized setting (for debuging)
     % cb.scenpar.PerClusterDS = 0;                            % Create new builder object
 %     cb.scenpar.SF_sigma = 0;                                % 0 dB shadow fading
 %     cb.scenpar.KF_mu = 0;                                   % 0 dB K-Factor
 %     cb.scenpar.KF_sigma = 0;                                % No KF variation
 %     cb.scenpar.SubpathMethod = 'mmMAGIC';
-    cb.plpar = [];                                          % Disable path loss model
+%     cb.plpar = [];                                          % Disable path loss model
     
-    % call builder for small scale fading parameters
+    % Call builder for small scale fading parameters
     cb.gen_ssf_parameters;                                  % Generate large- and small-scale fading
     
     % Drifting model for channel dynamics (off)
@@ -289,29 +297,41 @@ for MCidx = 1:MCtimes
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     H_QDG_f = zeros(Nr,Nt,P);
     H_QDG_t = zeros(Nr,Nt,P);
-
+    frac_delay = 10e-9;
+    
     for pp=1:P
         for path_idx = 1:cb.NumClusters
 
         H_QDG_f(:,:,pp) = H_QDG_f(:,:,pp) +...
-            exp(-1j*2*pi*(10*1e-9+d.delay(path_idx,1))*(pp-1)/(Ts*P))...
+            exp(-1j*2*pi*(frac_delay + d.delay(path_idx,1))*(pp-1)/(Ts*P))...
             *squeeze(chan_coeff(:,:,path_idx,1));
 
         end
     end
-
+    
     for nt_idx = 1:Nt
         for nr_idx = 1:Nr
             H_QDG_t(nr_idx,nt_idx,:) = ifft(H_QDG_f(nr_idx,nt_idx,:));
         end
     end
     
+    % Alternatively using QuaDRiGa build-in function to convert to taps
+    % Note this does not include any delay fractional to Ts from timing
+    % offset except overwrite d.delay
+%     h_tap = d.fr(BW,P,1);
+%     for nt_idx = 1:Nt
+%         for nr_idx = 1:Nr
+%     H_QDG_f(nr_idx,nt_idx,:) = squeeze(h_tap(nr_idx,nt_idx,:,1));
+%     H_QDG_t(nr_idx,nt_idx,:) = ifft(squeeze(H_QDG_f(nr_idx,nt_idx,:)),[],1);
+%         end
+%     end
+    
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     %
     %       Channel parameter and related (SV model)
     %
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
+    
     switch channel_model
         case 'QuaDRiGa'
             % phi & theta are not functional unless in SV; Only for debug 
@@ -397,7 +417,7 @@ for MCidx = 1:MCtimes
                             Ts,P);
                                           
         case 'QuaDRiGa'
-        H_chan_WB = H_QDG_t;
+        H_chan_WB = H_QDG_t * sqrt(10^(Tx_pow_dBW/10));
     end
     
     % Pre-compute some vectors/matrices (when ideal CP-Removal is used)
@@ -429,7 +449,7 @@ for MCidx = 1:MCtimes
     W = probe_Rx_BF./norm(probe_Rx_BF,'fro')*sqrt(M);
     
     probe_Tx_BF = (randi(2,Nt,M)*2-3) + 1j * (randi(2,Nt,M)*2-3);
-    F = probe_Tx_BF./norm(probe_Tx_BF,'fro')*sqrt(Nt*M);
+    F = probe_Tx_BF./norm(probe_Tx_BF,'fro')*sqrt(M);
     
     % Sensing dictionary - post-BF response for each possible AoA/AoD pair
     % It has M^2 rows and only M of them are useful
@@ -632,7 +652,12 @@ for MCidx = 1:MCtimes
     BFtype = 'PN';
     for ss = 1:SNR_num
         
-        noise_pow = 10^(-SNR_range(ss)/10);
+        % noise power for each SNR
+%         noise_pow = 10^(-SNR_range(ss)/10);
+
+        % Absolute noise power (100MHz equivalent BW)
+        % Also everything should be in dBW!!! subtract 30dB
+        noise_pow = 10^( (-174 + 10*log10(BW) + NF - 30)/10 );
         awgn_CP = noise_CP * sqrt(noise_pow);
         
         % case 'sector beamformer'
@@ -670,13 +695,17 @@ for MCidx = 1:MCtimes
         ave_Nc_H0 = Nc_acc_mtx * post_corr_ED_H0;
         ave_Nc_H1 = Nc_acc_mtx * post_corr_ED_H1;
         
-        [peak_pow_H1(ss) peakindex_H1(ss)] = max(ave_Nc_H1(1:STO_max));
-        peak_pow_H0(ss) = max(ave_Nc_H0(1:STO_max));
+        [peak_pow_H1(MCidx) peakindex_H1(ss)] = max(ave_Nc_H1(1:STO_max));
+        peak_pow_H0(MCidx) = max(ave_Nc_H0(1:STO_max));
 
         % ----- Single-Peak Detection w. directional beams---------
         % Practical scenario where peak location is unknown
-        peak_pow_H1_sec(ss) = max(corr_out_H1_STO_sec);
-        peak_pow_H0_sec(ss) = max(corr_out_H0_STO_sec);
+        peak_pow_H1_sec(MCidx) = max(corr_out_H1_STO_sec);
+        peak_pow_H0_sec(MCidx) = max(corr_out_H0_STO_sec);
+        
+        % decision
+        decision_CS(MCidx) = peak_pow_H1(MCidx) > CS_TH;
+        decision_sec(MCidx) = peak_pow_H1_sec(MCidx) > sec_TH;
 
         
         % SNR and Adding AWGN to Rx Signal (when Ideal CP-removal Sig. for ChEst)
@@ -1217,6 +1246,9 @@ xlabel('SNR (dB)')
 ylabel('Misalignment Rate')
 legend('CSIA, mmMAGIC UMi LOS','DIA, mmMAGIC UMi LOS')
 %% BF gain CDF
+BW_data = 400e6;
+noise_pow_dBm = -174 + 10*log10(BW_data) + NF - 30; % Data band noise pow in [dBW]
+
 switch channel_model
     case 'SV'
     [b_PN,a_PN] = ecdf(20*log10(sqrt(Nt*Nr)*abs(data_mag_BF)./abs(data_mag_raw)));
@@ -1224,11 +1256,11 @@ switch channel_model
     [b_dir,a_dir] = ecdf(20*log10(sqrt(Nt*Nr)*abs(data_mag_dir)./abs(data_mag_raw)));
     [b_true,a_true] = ecdf(20*log10(sqrt(Nt*Nr)*abs(data_mag_true)./abs(data_mag_raw)));
     case 'QuaDRiGa'
-    [b_PN,a_PN] = ecdf(10*log10(sqrt(1)*abs(data_mag_BF)./abs(1)));
-    [b_sec,a_sec] = ecdf(10*log10(sqrt(1)*abs(data_mag_sec)./abs(1)));
-    [b_dir1,a_dir1] = ecdf(10*log10(sqrt(1)*abs(data_mag_dir1)./abs(1)));
-    [b_dir,a_dir] = ecdf(10*log10(sqrt(1)*abs(data_mag_dir)./abs(1)));
-    [b_true,a_true] = ecdf(10*log10(sqrt(1)*abs(data_mag_true)./abs(1)));
+    [b_PN,a_PN] = ecdf(-noise_pow_dBm + 10*log10(abs(data_mag_BF(find(decision_CS)))));
+    [b_sec,a_sec] = ecdf(-noise_pow_dBm + 10*log10(abs(data_mag_sec(find(decision_sec)))));
+    [b_dir1,a_dir1] = ecdf(-noise_pow_dBm + 10*log10(abs(data_mag_dir1(find(decision_sec)))));
+    [b_dir,a_dir] = ecdf(-noise_pow_dBm + 10*log10(abs(data_mag_dir(find(decision_sec)))));
+    [b_true,a_true] = ecdf(-noise_pow_dBm + 10*log10(abs(data_mag_true)));
 end
 
 figure
@@ -1239,7 +1271,7 @@ plot(a_dir,b_dir,'linewidth',2);hold on
 plot(a_true,b_true,'linewidth',2);hold on
 
 grid on
-xlim([20,50])
-xlabel('BF Gain [dB]')
+% xlim([-20,40])
+xlabel('Data Phase Post-BF SNR [dB]')
 ylabel('Prob(Gain<abscissa)')
-legend('Proposed','DIA w/o CSI-RS','DIA w/ 1 CSI-RS','DIA w/ 2 CSI-RS','True AoA/AoD')
+legend('CSIA w/o RS','DIA  w/o RS','DIA  w/ 1 RS','DIA  w/ 2 RS','"Genie" Steering')
