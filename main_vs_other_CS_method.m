@@ -16,8 +16,8 @@ AOAspread2 = 0;
 AOAspread = 0;
 AODspread2 = 0;
 AODspread = 0;
-SNR_num = 4;
-SNR_range = linspace(-10,20,SNR_num);
+SNR_num = 1;
+SNR_range = linspace(50,50,SNR_num);
 fc = 28e9;
 BW = 2048e6; % IA bandiwdth
 Ts = 1/BW; % Sample duration
@@ -253,7 +253,7 @@ for MCindex = 1:MCtimes
         
         % ---------------   AoA/AoD Estimation   ----------------
         sig_desymb = zeros(M,1);
-
+        sig_ave_P = (mean(DFT * reshape(sig_noisy,P,M),1)).';
 
         % Evaluate average subcarrier
         
@@ -304,8 +304,8 @@ for MCindex = 1:MCtimes
         
         phi_hat(1) = bestAOA(MCindex,ss);
         theta_hat(1)= bestAOD(MCindex,ss);
-        tau_hat(1) = delay_est(ss,MCindex);
-        stop_sign = 1;
+        tau_hat(1) = tau_samp(MCindex);%delay_est(ss,MCindex);
+        stop_sign = 0;
         while stop_sign==0
             ii = ii + 1;
             %---------------------------------------------
@@ -314,22 +314,22 @@ for MCindex = 1:MCtimes
             arx_hat = exp(1j*(0:Nr-1)'*pi*sin(phi_hat(ii)))/sqrt(Nr);
             Psi = pi*(0:Nt-1).'*df/fc*sin(theta_hat(ii))+tau_hat(ii)/P;
             atx_hat = exp(1j*(0:Nt-1)'*pi*sin(theta_hat(ii)))/sqrt(Nt);
-            atx_mod_hat = atx_hat.*(1-exp(-1j*Psi*P))./(1-exp(-1j*Psi));
+            atx_mod_hat = conj(atx_hat).*(1-exp(-1j*Psi*P))./(1-exp(-1j*Psi));
 %             fvec_hat = exp(-1j*(0:P-1).'*tau_hat(ii) / P);
 
-            H_cal = diag(W' * arx_hat * atx_mod_hat' * F);
+            H_cal = diag(W' * arx_hat * atx_mod_hat.' * F);
             sig_alpha = H_cal;
-            alpha_hat(ii) = pinv(sig_alpha) * sig_noisy;
-            error(ii) = norm(alpha_hat(ii)*sig_alpha - sig_noisy);
+            alpha_hat(ii) = pinv(sig_alpha) * sig_ave_P;
+            error(ii) = norm(alpha_hat(ii)*sig_alpha - sig_ave_P);
             
             % determine when to stop
             if ii>1
                 if error(ii) > error(ii-1)
                     stop_sign = 1;
                 end
-                if abs(error(ii)-error(ii-1))/abs(error(ii-1))<1e-4
-                    stop_sign = 1;
-                end
+%                 if abs(error(ii)-error(ii-1))/abs(error(ii-1))<1e-4
+%                     stop_sign = 1;
+%                 end
                 if ii > max_ite_num
                     stop_sign = 1;
                 end
@@ -362,12 +362,12 @@ for MCindex = 1:MCtimes
             %---------------------------------------------      
             dPhi = exp(1j*pi*(0:Nr-1).'*sin(phi_hat(ii)))/sqrt(Nr).*(1j*pi*(0:Nr-1).'*cos(phi_hat(ii)));
             
-            D_cal = alpha_hat(ii) * diag(W' * dPhi * atx_mod_hat' * F);
-            H_cal = alpha_hat(ii) * diag(W' * arx_hat * atx_mod_hat' * F);
+            D_cal = alpha_hat(ii) * diag(W' * dPhi * atx_mod_hat.' * F);
+            H_cal = alpha_hat(ii) * diag(W' * arx_hat * atx_mod_hat.' * F);
             sig_dphi = D_cal;
             sig_phi = H_cal;
             
-            yr = sig_noisy - sig_phi;
+            yr = sig_ave_P - sig_phi;
             Q_cal = [real(sig_dphi);imag(sig_dphi)];
             tr = [real(yr);imag(yr)];
             dphi = pinv(Q_cal) * tr;
@@ -391,7 +391,7 @@ for MCindex = 1:MCtimes
             H_cal = alpha_hat(ii) * diag(W' * arx_hat * atx_mod_hat' * F);
             sig_theta = H_cal;
             
-            yr = sig_noisy - sig_theta;
+            yr = sig_ave_P - sig_theta;
             Q_cal = [real(sig_dtheta);imag(sig_dtheta)];
             tr = [real(yr);imag(yr)];
 
@@ -400,8 +400,8 @@ for MCindex = 1:MCtimes
 
         end
         
-        phi_last = bestAOA(MCindex,ss);
-        theta_last= bestAOD(MCindex,ss);
+        phi_last = phi_hat(ii+1);%bestAOA(MCindex,ss);
+        theta_last= theta_hat(ii+1);%bestAOD(MCindex,ss);
         
         AOA_error_nocomp(MCindex,ss) = abs(phi_last - phi0(MCindex));
         AOD_error_nocomp(MCindex,ss) = abs(theta_last - theta0(MCindex));
