@@ -21,7 +21,7 @@ SNR_range = linspace(50,50,SNR_num);
 fc = 28e9;
 BW = 2048e6; % IA bandiwdth
 Ts = 1/BW; % Sample duration
-P = 1024; % number of subcarrier
+P = 512; % number of subcarrier
 df = BW/P;
 DFT = dftmtx(P);
 
@@ -253,7 +253,7 @@ for MCindex = 1:MCtimes
         
         % ---------------   AoA/AoD Estimation   ----------------
         sig_desymb = zeros(M,1);
-        sig_ave_P = (mean(DFT * reshape(sig_noisy,P,M),1)).';
+        sig_ave_P = reshape((DFT * reshape(sig_noisy,P,M)).',P*M,1);
 
         % Evaluate average subcarrier
         
@@ -312,16 +312,30 @@ for MCindex = 1:MCtimes
             % Alpha estimation using previous coeff.
             %---------------------------------------------
             arx_hat = exp(1j*(0:Nr-1)'*pi*sin(phi_hat(ii)))/sqrt(Nr);
-            Psi = pi*(0:Nt-1).'*df/fc*sin(theta_hat(ii))+tau_hat(ii)/P;
-            atx_hat = exp(1j*(0:Nt-1)'*pi*sin(theta_hat(ii)))/sqrt(Nt);
-            atx_mod_hat = conj(atx_hat).*(1-exp(-1j*Psi*P))./(1-exp(-1j*Psi));
 %             fvec_hat = exp(-1j*(0:P-1).'*tau_hat(ii) / P);
-
-            H_cal = diag(W' * arx_hat * atx_mod_hat.' * F);
+            for pp=1:P
+                samp_idx = (pp-1)*M+1:pp*M;
+                atx_mod_hat = exp(1j*pi*(0:Nt-1).'*(1+(pp-1)*df/fc)*sin(theta_hat(ii)))/sqrt(Nt);
+                H_cal(samp_idx,1) = diag(W' * arx_hat * atx_mod_hat' * F)*exp(-1j*(pp-1)*tau_hat(ii)/P);
+            end
+            
             sig_alpha = H_cal;
             alpha_hat(ii) = pinv(sig_alpha) * sig_ave_P;
-            error(ii) = norm(alpha_hat(ii)*sig_alpha - sig_ave_P);
+            error(ii) = norm(sig_alpha * alpha_hat(ii) - sig_ave_P);
             
+            
+            %
+%             for pp=1:P
+%                 samp_idx = (pp-1)*M+1:pp*M;
+%                 weight_best(pp) = (pinv(sig_alpha(samp_idx)) * sig_ave_P(samp_idx));
+%             end
+%             figure
+%             plot(weight_best,'o')
+%             figure
+%             plot(22.6215*abs(sig_alpha(samp_idx)));hold on
+%             plot(abs(sig_ave_P(samp_idx)),'o')
+%             legend('guess','actual')
+            %%
             % determine when to stop
             if ii>1
                 if error(ii) > error(ii-1)
@@ -362,8 +376,13 @@ for MCindex = 1:MCtimes
             %---------------------------------------------      
             dPhi = exp(1j*pi*(0:Nr-1).'*sin(phi_hat(ii)))/sqrt(Nr).*(1j*pi*(0:Nr-1).'*cos(phi_hat(ii)));
             
-            D_cal = alpha_hat(ii) * diag(W' * dPhi * atx_mod_hat.' * F);
-            H_cal = alpha_hat(ii) * diag(W' * arx_hat * atx_mod_hat.' * F);
+            for pp=1:P
+                samp_idx = (pp-1)*M+1:pp*M;
+                atx_mod_hat = exp(1j*pi*(0:Nt-1).'*(1+(pp-1)*df/fc)*sin(theta_hat(ii)))/sqrt(Nt);
+                D_cal(samp_idx,1) = alpha_hat(ii) * diag(W' * dPhi * atx_mod_hat' * F)*exp(-1j*(pp-1)*tau_hat(ii)/P);
+                H_cal(samp_idx,1) = alpha_hat(ii) * diag(W' * arx_hat * atx_mod_hat' * F)*exp(-1j*(pp-1)*tau_hat(ii)/P);
+
+            end
             sig_dphi = D_cal;
             sig_phi = H_cal;
             
@@ -372,23 +391,23 @@ for MCindex = 1:MCtimes
             tr = [real(yr);imag(yr)];
             dphi = pinv(Q_cal) * tr;
             phi_hat(ii+1) = phi_hat(ii) + dphi;
-            
-            arx_hat = exp(1j*(0:Nr-1)'*pi*sin(phi_hat(ii+1)))/sqrt(Nr);
+%             
+%             arx_hat = exp(1j*(0:Nr-1)'*pi*sin(phi_hat(ii+1)))/sqrt(Nr);
             
             %---------------------------------------------
             % Theta estimation using previous coeff.
-            %---------------------------------------------      
-            dTheta = exp(1j*pi*(0:Nt-1).'*sin(theta_hat(ii)))/sqrt(Nt).*(1j*pi*(0:Nt-1).'*cos(theta_hat(ii)));
-            dPhidtheta = pi*(0:Nt-1).'*df/fc*cos(theta_hat(ii));
-            dPsi = (exp(-1j*P*Psi).*(1j*P*dPhidtheta).*(1-exp(-1j*Psi))...
-                        - exp(-1j*Psi).*(1j*dPhidtheta).*(1-exp(-1j*P*Psi)))...
-                        ./(1-exp(-1j*Psi)).^2;
+            %--------------------------------------------- 
+            for pp = 1:P
+                samp_idx = (pp-1)*M+1:pp*M;
+
+                dTheta = exp(1j*pi*(0:Nt-1).'*(1+(pp-1)*df/fc)*sin(theta_hat(ii)))/sqrt(Nt)...
+                            .*(1j*pi*(0:Nt-1).'*(1+(pp-1)*df/fc)*cos(theta_hat(ii)));
+                atx_mod_hat = exp(1j*pi*(0:Nt-1).'*(1+(pp-1)*df/fc)*sin(theta_hat(ii)))/sqrt(Nt);
+                D_cal(samp_idx,1) = alpha_hat(ii) * diag(W' * arx_hat * dTheta' * F)*exp(-1j*(pp-1)*tau_hat(ii)/P);
+                H_cal(samp_idx,1) = alpha_hat(ii) * diag(W' * arx_hat * atx_mod_hat' * F)*exp(-1j*(pp-1)*tau_hat(ii)/P);
+            end
             
-            dTheta_mod = conj(dTheta).*(1-exp(-1j*Psi*P))./(1-exp(-1j*Psi)) + dPsi.*conj(atx_hat);
-            
-            D_cal = alpha_hat(ii) * diag(W' * arx_hat * dTheta_mod.' * F);
             sig_dtheta = D_cal;
-            H_cal = alpha_hat(ii) * diag(W' * arx_hat * atx_mod_hat' * F);
             sig_theta = H_cal;
             
             yr = sig_ave_P - sig_theta;
