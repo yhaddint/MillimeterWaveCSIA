@@ -17,7 +17,7 @@ AOAspread = 0;
 AODspread2 = 0;
 AODspread = 0;
 SNR_num = 1;
-SNR_range = linspace(50,50,SNR_num);
+SNR_range = linspace(80,80,SNR_num);
 fc = 28e9;
 BW = 2048e6; % IA bandiwdth
 Ts = 1/BW; % Sample duration
@@ -285,6 +285,7 @@ for MCindex = 1:MCtimes
 %                 /(Measure_mat_new(:,dd)'*Measure_mat_new(:,dd));
 %         end
         [~,bestindex_comp(MCindex)] = max(max(abs(score_final),[],2));
+        [~,bestindex_tau(MCindex)] = max(max(abs(score_final),[],1));
         
 %         bestindex_comp(MCindex) = index_true;% debug. comment in main script
         bestrow = floor((bestindex_comp(MCindex)-1)/cand_num_r)+1;
@@ -304,7 +305,7 @@ for MCindex = 1:MCtimes
         
         phi_hat(1) = bestAOA(MCindex,ss);
         theta_hat(1)= bestAOD(MCindex,ss);
-        tau_hat(1) = tau_samp(MCindex);%delay_est(ss,MCindex);
+        tau_hat(1) = delay_est(ss,MCindex)+tau_adjust_range(bestindex_tau(MCindex));%tau_samp(MCindex)
         stop_sign = 0;
         while stop_sign==0
             ii = ii + 1;
@@ -319,7 +320,7 @@ for MCindex = 1:MCtimes
                 H_cal(samp_idx,1) = diag(W' * arx_hat * atx_mod_hat' * F)*exp(-1j*(pp-1)*tau_hat(ii)/P);
             end
             
-            sig_alpha = H_cal;
+            sig_alpha = sqrt(P)*H_cal;
             alpha_hat(ii) = pinv(sig_alpha) * sig_ave_P;
             error(ii) = norm(sig_alpha * alpha_hat(ii) - sig_ave_P);
             
@@ -341,9 +342,9 @@ for MCindex = 1:MCtimes
                 if error(ii) > error(ii-1)
                     stop_sign = 1;
                 end
-%                 if abs(error(ii)-error(ii-1))/abs(error(ii-1))<1e-4
-%                     stop_sign = 1;
-%                 end
+                if abs(error(ii)-error(ii-1))/abs(error(ii-1))<1e-6
+                    stop_sign = 1;
+                end
                 if ii > max_ite_num
                     stop_sign = 1;
                 end
@@ -353,23 +354,25 @@ for MCindex = 1:MCtimes
             %---------------------------------------------
             % tau estimation using previous coeff.
             %---------------------------------------------
-            tau_hat(ii+1) = tau_hat(ii);
-%             deF = 1j*kron(Nb*(0:M-1).',(0:P-1).')...
-%                 .*kron(exp(1j*eF_hat(ii)*Nb*(0:M-1).'),exp(1j*eF_hat(ii)*(0:P-1).'));
+%             tau_hat(ii+1) = tau_hat(ii);
 % 
-%             H_cal = alpha_hat(ii) * diag(W' * arx_hat * atx_hat' * F);
-%             sig_deF = kron(H_cal,delay_mtx(:,maxindex)).*deF;
-%             sig_eF = kron(H_cal,delay_mtx(:,maxindex)).*phase_error_refine;
-%             
-%             yr = sig_noisy - sig_eF;
-%             Q_cal = [real(sig_deF);imag(sig_deF)];
-%             tr = [real(yr);imag(yr)];
-% 
-%             deF = pinv(Q_cal) * tr;
-%             eF_hat(ii+1) = eF_hat(ii) + deF;
-%             
-%             phase_error_refine = kron( exp(1j*eF_hat(ii+1)*Nb*(0:M-1)).',...
-%                                        exp(1j*eF_hat(ii+1)*(0:P-1).'));
+            for pp=1:P
+                samp_idx = (pp-1)*M+1:pp*M;
+                atx_mod_hat = exp(1j*pi*(0:Nt-1).'*(1+(pp-1)*df/fc)*sin(theta_hat(ii)))/sqrt(Nt);
+                H_cal(samp_idx,1) = alpha_hat(ii) * diag(W' * arx_hat * atx_mod_hat' * F)*exp(-1j*(pp-1)*tau_hat(ii)/P);
+                D_cal(samp_idx,1) = H_cal(samp_idx,1) * (-1j*(pp-1)/P);
+            end
+            sig_dtau = sqrt(P)*D_cal;
+            sig_tau = sqrt(P)*H_cal;
+            
+            yr = sig_ave_P - sig_tau;
+            Q_cal = [real(sig_dtau);imag(sig_dtau)];
+            tr = [real(yr);imag(yr)];
+
+            dtau = pinv(Q_cal) * tr;
+            tau_hat(ii+1) = tau_hat(ii) + dtau;
+            
+
             
             %---------------------------------------------
             % Phi estimation using previous coeff.
@@ -383,8 +386,8 @@ for MCindex = 1:MCtimes
                 H_cal(samp_idx,1) = alpha_hat(ii) * diag(W' * arx_hat * atx_mod_hat' * F)*exp(-1j*(pp-1)*tau_hat(ii)/P);
 
             end
-            sig_dphi = D_cal;
-            sig_phi = H_cal;
+            sig_dphi = sqrt(P)*D_cal;
+            sig_phi = sqrt(P)*H_cal;
             
             yr = sig_ave_P - sig_phi;
             Q_cal = [real(sig_dphi);imag(sig_dphi)];
@@ -407,8 +410,8 @@ for MCindex = 1:MCtimes
                 H_cal(samp_idx,1) = alpha_hat(ii) * diag(W' * arx_hat * atx_mod_hat' * F)*exp(-1j*(pp-1)*tau_hat(ii)/P);
             end
             
-            sig_dtheta = D_cal;
-            sig_theta = H_cal;
+            sig_dtheta = sqrt(P)*D_cal;
+            sig_theta = sqrt(P)*H_cal;
             
             yr = sig_ave_P - sig_theta;
             Q_cal = [real(sig_dtheta);imag(sig_dtheta)];
@@ -416,7 +419,7 @@ for MCindex = 1:MCtimes
 
             dtheta = pinv(Q_cal) * tr;
             theta_hat(ii+1) = theta_hat(ii) + dtheta;
-
+q
         end
         
         phi_last = phi_hat(ii+1);%bestAOA(MCindex,ss);
