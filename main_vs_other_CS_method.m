@@ -16,8 +16,8 @@ AOAspread2 = 0;
 AOAspread = 0;
 AODspread2 = 0;
 AODspread = 0;
-SNR_num = 1;
-SNR_range = linspace(80,80,SNR_num);
+SNR_num = 4;
+SNR_range = linspace(-20,10,SNR_num);
 fc = 28e9;
 BW = 2048e6; % IA bandiwdth
 Ts = 1/BW; % Sample duration
@@ -295,8 +295,9 @@ for MCindex = 1:MCtimes
         
         
         % -------- Refinement to improve accuracy ----------------
-        fprintf('simulating proposed refinement with SNR = %d dB\n',SNR_range(ss))
-        max_ite_num = 5e2;
+        fprintf('simulating refinement with SNR = %d dB\n', SNR_range(ss));
+
+        max_ite_num = 1e2;
         ii = 0;
         phi_hat = zeros(max_ite_num+1,1);
         theta_hat = zeros(max_ite_num+1,1);
@@ -309,35 +310,30 @@ for MCindex = 1:MCtimes
         stop_sign = 0;
         while stop_sign==0
             ii = ii + 1;
+
             %---------------------------------------------
             % Alpha estimation using previous coeff.
             %---------------------------------------------
             arx_hat = exp(1j*(0:Nr-1)'*pi*sin(phi_hat(ii)))/sqrt(Nr);
-%             fvec_hat = exp(-1j*(0:P-1).'*tau_hat(ii) / P);
-            for pp=1:P
-                samp_idx = (pp-1)*M+1:pp*M;
-                atx_mod_hat = exp(1j*pi*(0:Nt-1).'*(1+(pp-1)*df/fc)*sin(theta_hat(ii)))/sqrt(Nt);
-                H_cal(samp_idx,1) = diag(W' * arx_hat * atx_mod_hat' * F)*exp(-1j*(pp-1)*tau_hat(ii)/P);
-            end
+            atx_phase = 1j*pi*(0:Nt-1).'*sin(theta_hat(ii));
+            atx_P = (1+(0:P-1)*df/fc);
+            atx_mod_hat = exp(atx_phase*atx_P)/sqrt(Nt);
+            f_hat = exp(-1j*(0:P-1)*tau_hat(ii)/P);
             
-            sig_alpha = sqrt(P)*H_cal;
+            H_cal_noalpha_raw = diag(W' * arx_hat)*(diag(f_hat) * (atx_mod_hat' * F)).';
+            H_cal_noalpha = reshape(H_cal_noalpha_raw,P*M,1);
+            
+%             for pp=1:P
+%                 samp_idx = (pp-1)*M+1:pp*M;
+%                 H_cal_noalpha(samp_idx,1) = (W' * arx_hat).*(atx_mod_hat(:,pp)' * F).'*exp(-1j*(pp-1)*tau_hat(ii)/P);
+%             end
+            
+            sig_alpha = sqrt(P)*H_cal_noalpha;
+            
             alpha_hat(ii) = pinv(sig_alpha) * sig_ave_P;
             error(ii) = norm(sig_alpha * alpha_hat(ii) - sig_ave_P);
             
-            
-            %
-%             for pp=1:P
-%                 samp_idx = (pp-1)*M+1:pp*M;
-%                 weight_best(pp) = (pinv(sig_alpha(samp_idx)) * sig_ave_P(samp_idx));
-%             end
-%             figure
-%             plot(weight_best,'o')
-%             figure
-%             plot(22.6215*abs(sig_alpha(samp_idx)));hold on
-%             plot(abs(sig_ave_P(samp_idx)),'o')
-%             legend('guess','actual')
-            %%
-            % determine when to stop
+            % Determine when to stop
             if ii>1
                 if error(ii) > error(ii-1)
                     stop_sign = 1;
@@ -350,76 +346,65 @@ for MCindex = 1:MCtimes
                 end
             end
             
+            %---------------------------------------------
+            % Derivatives over parameters
+            %---------------------------------------------
+            dPhi = exp(1j*pi*(0:Nr-1).'*sin(phi_hat(ii)))/sqrt(Nr).*(1j*pi*(0:Nr-1).'*cos(phi_hat(ii)));
+            H_cal = alpha_hat(ii) * H_cal_noalpha;
+            Dtau_cal = alpha_hat(ii) * reshape(H_cal_noalpha_raw * diag((-1j*(0:P-1).'/P)),M*P,1);
+            
+            Dphi_cal = alpha_hat(ii) * reshape(diag(W' * dPhi)*(diag(f_hat) * (atx_mod_hat' * F)).',P*M,1);
+            
+            dTheta = (1j*pi*(0:Nt-1).'*(1+(0:P-1)*df/fc)*cos(theta_hat(ii))).*atx_mod_hat;
+            
+            
+            Dtheta_cal = alpha_hat(ii) * reshape(diag(W' * arx_hat)*(diag(f_hat) * (dTheta' * F)).',P*M,1);
+                        
+%             for pp=1:P
+%                 samp_idx = (pp-1)*M+1:pp*M;
+                
+%                 Dtau_cal(samp_idx,1) = H_cal(samp_idx,1) * (-1j*(pp-1)/P);
+                
+%                 Dphi_cal(samp_idx,1) = alpha_hat(ii) * diag(W' * dPhi * atx_mod_hat(:,pp)' * F)*exp(-1j*(pp-1)*tau_hat(ii)/P);
+                
+%                 dTheta(:,pp) = exp(1j*pi*(0:Nt-1).'*(1+(pp-1)*df/fc)*sin(theta_hat(ii)))/sqrt(Nt)...
+%                             .*(1j*pi*(0:Nt-1).'*(1+(pp-1)*df/fc)*cos(theta_hat(ii)));
+                
+%                 Dtheta_cal(samp_idx,1) = alpha_hat(ii) * diag(W' * arx_hat * dTheta(:,pp)' * F)*exp(-1j*(pp-1)*tau_hat(ii)/P);
+                
+%             end
             
             %---------------------------------------------
-            % tau estimation using previous coeff.
-            %---------------------------------------------
-%             tau_hat(ii+1) = tau_hat(ii);
-% 
-            for pp=1:P
-                samp_idx = (pp-1)*M+1:pp*M;
-                atx_mod_hat = exp(1j*pi*(0:Nt-1).'*(1+(pp-1)*df/fc)*sin(theta_hat(ii)))/sqrt(Nt);
-                H_cal(samp_idx,1) = alpha_hat(ii) * diag(W' * arx_hat * atx_mod_hat' * F)*exp(-1j*(pp-1)*tau_hat(ii)/P);
-                D_cal(samp_idx,1) = H_cal(samp_idx,1) * (-1j*(pp-1)/P);
-            end
-            sig_dtau = sqrt(P)*D_cal;
-            sig_tau = sqrt(P)*H_cal;
-            
-            yr = sig_ave_P - sig_tau;
-            Q_cal = [real(sig_dtau);imag(sig_dtau)];
+            % Signal using previous coeff. and error v.s. observation
+            %--------------------------------------------- 
+            sig_current_par = sqrt(P) * H_cal;
+            yr = sig_ave_P - sig_current_par;
             tr = [real(yr);imag(yr)];
 
+            %---------------------------------------------
+            % Tau estimation using previous coeff.
+            %---------------------------------------------  
+            sig_dtau = sqrt(P) * Dtau_cal;
+            Q_cal = [real(sig_dtau);imag(sig_dtau)];
             dtau = pinv(Q_cal) * tr;
             tau_hat(ii+1) = tau_hat(ii) + dtau;
-            
-
-            
+                       
             %---------------------------------------------
             % Phi estimation using previous coeff.
             %---------------------------------------------      
-            dPhi = exp(1j*pi*(0:Nr-1).'*sin(phi_hat(ii)))/sqrt(Nr).*(1j*pi*(0:Nr-1).'*cos(phi_hat(ii)));
-            
-            for pp=1:P
-                samp_idx = (pp-1)*M+1:pp*M;
-                atx_mod_hat = exp(1j*pi*(0:Nt-1).'*(1+(pp-1)*df/fc)*sin(theta_hat(ii)))/sqrt(Nt);
-                D_cal(samp_idx,1) = alpha_hat(ii) * diag(W' * dPhi * atx_mod_hat' * F)*exp(-1j*(pp-1)*tau_hat(ii)/P);
-                H_cal(samp_idx,1) = alpha_hat(ii) * diag(W' * arx_hat * atx_mod_hat' * F)*exp(-1j*(pp-1)*tau_hat(ii)/P);
-
-            end
-            sig_dphi = sqrt(P)*D_cal;
-            sig_phi = sqrt(P)*H_cal;
-            
-            yr = sig_ave_P - sig_phi;
+            sig_dphi = sqrt(P)*Dphi_cal;
             Q_cal = [real(sig_dphi);imag(sig_dphi)];
-            tr = [real(yr);imag(yr)];
             dphi = pinv(Q_cal) * tr;
             phi_hat(ii+1) = phi_hat(ii) + dphi;
-%             
-%             arx_hat = exp(1j*(0:Nr-1)'*pi*sin(phi_hat(ii+1)))/sqrt(Nr);
             
             %---------------------------------------------
             % Theta estimation using previous coeff.
             %--------------------------------------------- 
-            for pp = 1:P
-                samp_idx = (pp-1)*M+1:pp*M;
-
-                dTheta = exp(1j*pi*(0:Nt-1).'*(1+(pp-1)*df/fc)*sin(theta_hat(ii)))/sqrt(Nt)...
-                            .*(1j*pi*(0:Nt-1).'*(1+(pp-1)*df/fc)*cos(theta_hat(ii)));
-                atx_mod_hat = exp(1j*pi*(0:Nt-1).'*(1+(pp-1)*df/fc)*sin(theta_hat(ii)))/sqrt(Nt);
-                D_cal(samp_idx,1) = alpha_hat(ii) * diag(W' * arx_hat * dTheta' * F)*exp(-1j*(pp-1)*tau_hat(ii)/P);
-                H_cal(samp_idx,1) = alpha_hat(ii) * diag(W' * arx_hat * atx_mod_hat' * F)*exp(-1j*(pp-1)*tau_hat(ii)/P);
-            end
-            
-            sig_dtheta = sqrt(P)*D_cal;
-            sig_theta = sqrt(P)*H_cal;
-            
-            yr = sig_ave_P - sig_theta;
+            sig_dtheta = sqrt(P)*Dtheta_cal;
             Q_cal = [real(sig_dtheta);imag(sig_dtheta)];
-            tr = [real(yr);imag(yr)];
-
             dtheta = pinv(Q_cal) * tr;
             theta_hat(ii+1) = theta_hat(ii) + dtheta;
-q
+
         end
         
         phi_last = phi_hat(ii+1);%bestAOA(MCindex,ss);

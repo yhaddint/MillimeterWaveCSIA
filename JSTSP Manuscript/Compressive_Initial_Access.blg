@@ -1,0 +1,20 @@
+This is BibTeX, Version 0.99dThe top-level auxiliary file: Compressive_Initial_Access.aux
+The style file: IEEEtran.bst
+Database file #1: IEEEabrv.bib
+Database file #2: references.bib
+Warning--string name "ieee_j_twc" is undefined
+--line 243 of file references.bib
+Warning--string name "ieee_j_tit" is undefined
+--line 767 of file references.bib
+-- IEEEtran.bst version 1.14 (2015/08/26) by Michael Shell.
+-- http://www.michaelshell.org/tex/ieeetran/bibtex/
+-- See the "IEEEtran_bst_HOWTO.pdf" manual for usage information.
+Warning--empty journal in 3GPP_PHY_study
+Warning--empty journal in Caire_DIA_arxiv_1709
+Warning--empty journal in 4373412
+Warning--empty journal in 3GPP_modulation
+Warning--empty year in mmMAGIC_model
+Warning--missing publisher in array_textbook
+
+Done.
+(There were 8 warnings)
