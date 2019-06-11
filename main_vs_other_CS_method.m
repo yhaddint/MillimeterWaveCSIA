@@ -11,85 +11,43 @@ path_num = 1; % Num of rays in a cluster
 Nr = 16; % Number of antenna in Rx
 Nt = 128;
 M = 64; % Length of training
-MCtimes = 20; % Num of Monte Carlo Sim.
+MCtimes = 50; % Num of Monte Carlo Sim.
 AOAspread2 = 0;
 AOAspread = 0;
 AODspread2 = 0;
 AODspread = 0;
-SNR_num = 4;
-SNR_range = linspace(-20,10,SNR_num);
+% SNR_num = 1;
+% SNR_range = linspace(0,0,SNR_num);
+SNR = 0; % in [dB]
 fc = 28e9;
-BW = 2048e6; % IA bandiwdth
-Ts = 1/BW; % Sample duration
-P = 512; % number of subcarrier
-df = BW/P;
-DFT = dftmtx(P);
 
-%-------- dictionary generation -------------
-cand_num_r = 33;
-cand_num_t = 255;
-dict_num = cand_num_r*cand_num_t;
+% BW_range = [1,10]*1e6;
+% P_range = [64,64];
 
-cand_y = zeros(M,cand_num_r*cand_num_t);
-cand_angle_r = linspace(-pi*60/180,pi*60/180,cand_num_r);
-AOAstep = cand_angle_r(2)-cand_angle_r(1);
-cand_angle_t = linspace(-pi*60/180,pi*60/180,cand_num_t);
-AODstep = cand_angle_t(2)-cand_angle_t(1);
-
-cand_ARV_r = exp(1j*(0:Nr-1)'*pi*sin(cand_angle_r));
-cand_ARV_t = exp(1j*(0:Nt-1)'*pi*sin(cand_angle_t));
-
-% ------- Squint Tailored Dictionary -----------
-dict_adapt = zeros(M,dict_num);
-% for dd=1:dict_num
-%     rowdd = floor((dd-1)/cand_num_r)+1;
-%     coldd = dd-(rowdd-1)*cand_num_r;
-%     Gamma(1,dd) = P;%conj(Gamma2);
-% 
-%     if rowdd == (cand_num_t+1)/2
-%         Gamma(2:Nt,dd) = P;
-%     else
-%         for nn=1:Nt-1
-% %                 alpha_new(nn+1) = exp(1j*pi*(df/fc)*(nn)*sin(cand_angle_t(rowdd)))...
-% %                         *exp(1j*delay_est(ss,MCindex)/P);
-%             alpha_new(nn+1) = exp(1j*pi*(df/fc)*(nn)*sin(cand_angle_t(rowdd)));
-% 
-% 
-%             Gamma(nn+1,dd) = (1-(alpha_new(nn+1))^(P))/(1-alpha_new(nn+1));
-%         end
-%     end
-% 
-%     arx_dd(:,dd) = exp(1j * pi * (0:Nr-1)' * sin(cand_angle_r(coldd)))/sqrt(Nr);       
-%     atx_dd(:,dd) = exp(1j * pi * (0:Nt-1)' * sin(cand_angle_t(rowdd)))/sqrt(Nt);
-%     atx_tilde(:,dd) = diag(Gamma(:,dd))*atx_dd(:,dd);
-% 
-% %             best_fit = pinv(dict_adapt)*(sig_ave_SC);
-% end
-for tt = 1:cand_num_t
-    Gamma(1,tt) = P;%conj(Gamma2);
-    if tt == (cand_num_t+1)/2
-        Gamma(2:Nt,tt) = P;
-    else
-        for nn=1:Nt-1
-%                 alpha_new(nn+1) = exp(1j*pi*(df/fc)*(nn)*sin(cand_angle_t(rowdd)))...
-%                         *exp(1j*delay_est(ss,MCindex)/P);
-            alpha_new(nn+1) = exp(1j*pi*(df/fc)*(nn)*sin(cand_angle_t(tt)));
-
-
-            Gamma(nn+1,tt) = (1-(alpha_new(nn+1))^(P))/(1-alpha_new(nn+1));
-        end
-    end
-    atx_dd(:,tt) = exp(1j * pi * (0:Nt-1)' * sin(cand_angle_t(tt)))/sqrt(Nt);
-    atx_tilde(:,tt) = diag(Gamma(:,tt))*atx_dd(:,tt);
-end
-
-       
+BW_range = [5,10,25,50,100,200,400,1000,2000]*1e6;
+P_range = ones(length(BW_range),1)*64;
+% P_range = [64,64,128,128,256,256,512,512];
 
 % For loop for Monte Carlo Simulations (realization of g, angle spread, and beamformer)
 for MCindex = 1:MCtimes
     
-    clc; fprintf('iteration %d:\n',MCindex);
+    clc;fprintf('iteration %d:\n',MCindex);
+    %-------- dictionary generation -------------
+    cand_num_r = 33;
+    cand_num_t = 255;
+    dict_num = cand_num_r*cand_num_t;
+
+    cand_y = zeros(M,cand_num_r*cand_num_t);
+    cand_angle_r = linspace(-pi*60/180,pi*60/180,cand_num_r);
+    AOAstep = cand_angle_r(2)-cand_angle_r(1);
+    cand_angle_t = linspace(-pi*60/180,pi*60/180,cand_num_t);
+    AODstep = cand_angle_t(2)-cand_angle_t(1);
+
+    cand_ARV_r = exp(1j*(0:Nr-1)'*pi*sin(cand_angle_r));
+    cand_ARV_t = exp(1j*(0:Nt-1)'*pi*sin(cand_angle_t));
     
+    
+    % ------- Dictionary Adaptation -------
     fprintf('constructing dictionary...\n')
     % Receiver beamformer: 1) quasi-omni beam from random steering mtx; 2)
     % directional beam from angle steering vector
@@ -109,18 +67,9 @@ for MCindex = 1:MCtimes
         Measure_mat_new_norm(cc) = norm(Measure_mat_new(:,cc),2)^2;
     end
     
-    % new dictionary
-    dict_adapt_long = P*kron(transpose(F)*conj(atx_tilde),W'*cand_ARV_r);
-    dict_adapt = dict_adapt_long(select_row,:);
-%     for dd=1:dict_num
-%         for mm=1:M
-%             dict_adapt(mm,dd) = P*(W(:,mm)'*arx_dd(:,dd)) * conj(F(:,mm)'*(diag(Gamma(:,dd))*atx_dd(:,dd)));
-%         end
-%     end
+
     
-    
-%     probe_Tx_BF = ones(Nt,M);
-%     F = probe_Tx_BF./norm(probe_Tx_BF,'fro')*sqrt(Nt*M);   
+    % ------- Channel generation -----------
     fprintf('constructing channel...\n')
     % AoA of rays with disired seperation
     phi = zeros(path_num,1);
@@ -132,74 +81,109 @@ for MCindex = 1:MCtimes
     theta0(MCindex) = (rand*10+35)/180*pi;%-43.9370/180*pi;%(rand*90-45)/180*pi; 
     % Index 25 in the dictionary
     theta = theta0(MCindex) + randn(path_num,1) * AODspread;
-    
+
     % Find True AoA/AoD in grid (for debug)
     [~,row_true] = min(abs(cand_angle_r - phi0(MCindex)));
     [~,col_true] = min(abs(cand_angle_t - theta0(MCindex)));
     index_true = (col_true-1)*cand_num_r + row_true;
 
-%     % Gain
-%     g_cmplx = exp(1j*rand(ray_num,1)*2*pi)/sqrt(ray_num);
-%     g = g_cmplx;
-    % Rotate of ray
+    % Path delay 
     tau = rand*(90e-9);
-    tau_samp(MCindex) = tau/Ts*2*pi;
-%     g_ray = (randn+1j*randn)/sqrt(2);
+
+    % Gain
     g_ray = 1;%exp(1j*rand*2*pi);
-
-    % Pre-compute some vectors/matrices in FIM
-    for pathindex = 1:path_num
-
-        % Spatial response in T/Rx
-        arx(:,pathindex) = exp(1j * pi * (0:Nr-1)' * sin(phi(pathindex)))/sqrt(Nr);       
-        atx(:,pathindex) = exp(1j * pi * (0:Nt-1)' * sin(theta(pathindex)))/sqrt(Nt);
         
-        % Delay response and its derivative over tau
-        fvec(:,pathindex) = exp(-1j * (0:P-1)' * tau_samp(MCindex) / P);
+    
+    % ------- For loop for different BW -------
+    for ss=1:length(BW_range)
+        fprintf('simulating BW = %d MHz\n',BW_range(ss)/1e6)
+
+        % ------- Bandwidth related parameters -------
+        BW = BW_range(ss); % IA bandiwdth
+        Ts = 1/BW; % Sample duration
+        P = P_range(ss); % number of subcarrier
+        df = BW/P;
+        DFT = dftmtx(P);
+        tau_samp(MCindex,ss) = tau/Ts*2*pi;
         
-    end
-    
-    % Received signals (Using unit freq training symbol)
-    tau_num = 1e3;
-    delay_cand = linspace(0,100,tau_num)*1e-9/Ts*2*pi;
-    for tt=1:tau_num
-        delay_mtx(:,tt) = (exp(-1j * (0:P-1)' * delay_cand(tt) / P));
-    end
-    
-    sig_rx = zeros(P*M,1);
-    gain_debug = zeros(P,M);
-    for ll=1:path_num
-        for mm=1:M
-            index = (mm-1)*P+1:mm*P;
-            sig_freq = zeros(P,1);
-            for pp = 1:P
-                atx_new(:,pp) = exp(1j * pi *(1+(pp-1)*df/fc) * (0:Nt-1)' * sin(theta(ll)))/sqrt(Nt);
-                
-                sig_freq(pp) = g_ray(ll) * (W(:,mm)'*arx(:,ll)) * conj(F(:,mm)'*atx_new(:,pp))...
-                *fvec(pp);
-%                 gain_debug(pp,mm) = conj(F(:,mm)'*atx_new(:,pp));
-%                 sig_freq(pp) = conj(F(:,mm)'*atx_new(:,pp)) * fvec(pp);
-            end
-            
-            sig_rx(index) = DFT'* sig_freq/sqrt(P);
+        % ------- Precompute for Delay matching pursuit -------
+        tau_num = 1e3;
+        delay_cand = linspace(0,100,tau_num)*1e-9/Ts*2*pi;
+        delay_mtx = zeros(P,tau_num);
+        for tt=1:tau_num
+            delay_mtx(:,tt) = (exp(-1j * (0:P-1)' * delay_cand(tt) / P));
         end
-    end
-    
-    awgn = (randn(P*M,1)+1j*randn(P*M,1))/sqrt(2)/sqrt(Nr);
+
+        % ------- Squint Tailored Dictionary -----------
+        dict_adapt = zeros(M,dict_num);
+        for tt = 1:cand_num_t
+            Gamma(1,tt) = P;%conj(Gamma2);
+            if tt == (cand_num_t+1)/2
+                Gamma(2:Nt,tt) = P;
+            else
+                for nn=1:Nt-1
+        %                 alpha_new(nn+1) = exp(1j*pi*(df/fc)*(nn)*sin(cand_angle_t(rowdd)))...
+        %                         *exp(1j*delay_est(ss,MCindex)/P);
+                    alpha_new(nn+1) = exp(1j*pi*(df/fc)*(nn)*sin(cand_angle_t(tt)));
+
+
+                    Gamma(nn+1,tt) = (1-(alpha_new(nn+1))^(P))/(1-alpha_new(nn+1));
+                end
+            end
+            atx_dd(:,tt) = exp(1j * pi * (0:Nt-1)' * sin(cand_angle_t(tt)))/sqrt(Nt);
+            atx_tilde(:,tt) = diag(Gamma(:,tt))*atx_dd(:,tt);
+        end
+        
+        % new dictionary
+        dict_adapt_long = P*kron(transpose(F)*conj(atx_tilde),W'*cand_ARV_r);
+        dict_adapt = dict_adapt_long(select_row,:);
+
+
+        % ------- Received signals (Using unit freq training symbol) -------
+        fvec = zeros(P,path_num);
+        for pathindex = 1:path_num
+
+            % Spatial response in T/Rx
+            arx(:,pathindex) = exp(1j * pi * (0:Nr-1)' * sin(phi(pathindex)))/sqrt(Nr);       
+            atx(:,pathindex) = exp(1j * pi * (0:Nt-1)' * sin(theta(pathindex)))/sqrt(Nt);
+
+            % Delay response and its derivative over tau
+            fvec(:,pathindex) = exp(-1j * (0:P-1)' * tau_samp(MCindex,ss) / P);
+
+        end
+
+        sig_rx = zeros(P*M,1);
+        for ll=1:path_num
+            for mm=1:M
+                index = (mm-1)*P+1:mm*P;
+                sig_freq = zeros(P,1);
+                for pp = 1:P
+                    atx_new(:,pp) = exp(1j * pi *(1+(pp-1)*df/fc) * (0:Nt-1)' * sin(theta(ll)))/sqrt(Nt);
+
+                    sig_freq(pp) = g_ray(ll) * (W(:,mm)'*arx(:,ll)) * conj(F(:,mm)'*atx_new(:,pp))...
+                    *fvec(pp);
+                end
+
+                sig_rx(index) = DFT'* sig_freq/sqrt(P);
+            end
+        end
+        
+        awgn = (randn(P*M,1)+1j*randn(P*M,1))/sqrt(2)/sqrt(Nr);
     
     % ------------- For loop for Various SNR ----------------------
     
-    for ss = 1:SNR_num
-        
-        fprintf('simulating BM with SNR = %d dB\n',SNR_range(ss))
+%     for ss = 1:BW_num
+
+%         fprintf('simulating BM with SNR = %d dB\n',SNR_range(ss))
         % SNR and Adding AWGN to Rx Signal
-        sigman2 = 10^(-SNR_range(ss)/10);
+        sigman2 = 10^(-SNR/10);
         sig_noisy = sig_rx + awgn * sqrt(sigman2);
         
         % ----- Benchmark Method #1 (OMP per Subcarrier) ---------
+        fprintf('simulating benchmark method (coarse)\n')
         sig_PtimeM = DFT * reshape(sig_noisy,P,M);
-        for pp=1:round(P/16)
-            SC_idx = (pp-1)*16+1;
+        for pp=1:P
+            SC_idx = pp;%(pp-1)*8+1;
             sig_for_OMP = sig_PtimeM(SC_idx,:).';
             for dd=1:dict_num
                 score_OMP(dd) = abs(sig_for_OMP'*(Measure_mat_new(:,dd)))...
@@ -211,13 +195,102 @@ for MCindex = 1:MCtimes
             bestAOA_temp(pp) = (bestcol-1)*AOAstep-60*pi/180;
             bestAOD_temp(pp) = (bestrow-1)*AODstep-60*pi/180;
         end
+          
+        % --------Refinement w/o Squint Awareness ---------------
+        fprintf('simulating benchmark method (fine)\n')
+        for pp=1:P
+%         SC_idx = (round(P/8)-1)*8+1;
+        SC_idx = pp;
+        max_ite_num = 1e2;
+        ii = 0;
+        phi_hat = zeros(max_ite_num+1,1);
+        theta_hat = zeros(max_ite_num+1,1);
+        alpha_hat = zeros(max_ite_num+1,1);
         
-%         bestAOA_BM = mean(bestAOA_temp);
-%         bestAOD_BM = mean(bestAOD_temp);
-        AOA_error_BM(MCindex,ss) = sqrt(mean(abs(bestAOA_temp - phi0(MCindex)).^2));
-        AOD_error_BM(MCindex,ss) = sqrt(mean(abs(bestAOD_temp - theta0(MCindex)).^2));
-        
-        % --------Benchmark Method #2 (???) ---------------
+        phi_hat(1) = bestAOA_temp(pp);%phi0(MCindex);
+        theta_hat(1)= bestAOD_temp(pp);%theta0(MCindex)*(1+(P-1)*df/fc);
+        stop_sign = 0;
+        sig_refine_ob = sig_PtimeM(pp,:).';
+        while stop_sign==0
+            ii = ii + 1;
+
+            %---------------------------------------------
+            % Alpha estimation using previous coeff.
+            %---------------------------------------------
+            arx_hat = exp(1j*(0:Nr-1)'*pi*sin(phi_hat(ii)))/sqrt(Nr);
+            atx_hat = exp(1j*(0:Nt-1)'*pi*sin(theta_hat(ii)))/sqrt(Nt);
+            
+            H_cal_noalpha_raw = diag(W' * arx_hat)*((atx_hat' * F)).';
+            H_cal_noalpha = H_cal_noalpha_raw;
+            
+%             for pp=1:P
+%                 samp_idx = (pp-1)*M+1:pp*M;
+%                 H_cal_noalpha(samp_idx,1) = (W' * arx_hat).*(atx_mod_hat(:,pp)' * F).'*exp(-1j*(pp-1)*tau_hat(ii)/P);
+%             end
+            
+            sig_alpha = sqrt(P)*H_cal_noalpha;
+            
+            alpha_hat(ii) = pinv(sig_alpha) * sig_refine_ob;
+            error(ii) = norm(sig_alpha * alpha_hat(ii) - sig_refine_ob);
+            
+            % Determine when to stop
+            if ii>1
+                if error(ii) > error(ii-1)
+                    stop_sign = 1;
+                end
+                if abs(error(ii)-error(ii-1))/abs(error(ii-1))<1e-6
+                    stop_sign = 1;
+                end
+                if ii > max_ite_num
+                    stop_sign = 1;
+                end
+            end
+            
+            %---------------------------------------------
+            % Derivatives over parameters
+            %---------------------------------------------
+            dPhi = exp(1j*pi*(0:Nr-1).'*sin(phi_hat(ii)))/sqrt(Nr).*(1j*pi*(0:Nr-1).'*cos(phi_hat(ii)));
+            H_cal = alpha_hat(ii) * H_cal_noalpha;
+            
+            Dphi_cal = alpha_hat(ii) * reshape(diag(W' * dPhi)*((atx_hat' * F)).',M,1);
+            
+            dTheta = (1j*pi*(0:Nt-1).'*cos(theta_hat(ii))).*atx_hat;
+            Dtheta_cal = alpha_hat(ii) * reshape(diag(W' * arx_hat)*((dTheta' * F)).',M,1);
+                                   
+            %---------------------------------------------
+            % Signal using previous coeff. and error v.s. observation
+            %--------------------------------------------- 
+            sig_current_par = sqrt(P) * H_cal;
+            yr = sig_refine_ob - sig_current_par;
+            tr = [real(yr);imag(yr)];
+                      
+            %---------------------------------------------
+            % Phi estimation using previous coeff.
+            %---------------------------------------------      
+            sig_dphi = sqrt(P)*Dphi_cal;
+            Q_cal = [real(sig_dphi);imag(sig_dphi)];
+            dphi = pinv(Q_cal) * tr;
+            phi_hat(ii+1) = phi_hat(ii) + dphi;
+            
+            %---------------------------------------------
+            % Theta estimation using previous coeff.
+            %--------------------------------------------- 
+            sig_dtheta = sqrt(P)*Dtheta_cal;
+            Q_cal = [real(sig_dtheta);imag(sig_dtheta)];
+            dtheta = pinv(Q_cal) * tr;
+            theta_hat(ii+1) = theta_hat(ii) + dtheta;
+
+        end
+            theta_last(pp) = theta_hat(ii+1);
+            phi_last(pp) = phi_hat(ii+1);
+        end
+        AOA_error_BM(MCindex,ss) = abs(mean(phi_last) - phi0(MCindex));
+        AOD_error_BM(MCindex,ss) = abs(mean(theta_last) - theta0(MCindex));
+
+%         AOA_error_BM(MCindex,ss) = abs(phi_hat(ii+1) - phi0(MCindex));
+%         AOD_error_BM(MCindex,ss) = abs(theta_hat(ii+1) - theta0(MCindex));
+%         
+
         
         % -------- Genie Verification on Dictionary Adaptation ------
 %         alpha_mtx = exp(-1j*(0:P-1).'*tau_samp(MCindex)/P);
@@ -239,7 +312,7 @@ for MCindex = 1:MCtimes
 
         
         % -------- Proposed Method w/ First Delay Matching Pursuit ------------
-        fprintf('simulating proposed with SNR = %d dB\n',SNR_range(ss))
+        fprintf('simulating proposed method (coarse)\n')
         sig_ave = mean(DFT * reshape(sig_noisy,P,M),2);
         for tt=1:tau_num
             score(tt) = abs(sum(sig_ave.*conj(delay_mtx(:,tt)))/norm(delay_mtx(:,tt))^2);
@@ -295,7 +368,7 @@ for MCindex = 1:MCtimes
         
         
         % -------- Refinement to improve accuracy ----------------
-        fprintf('simulating refinement with SNR = %d dB\n', SNR_range(ss));
+        fprintf('simulating proposed method (fine)\n');
 
         max_ite_num = 1e2;
         ii = 0;
@@ -416,7 +489,7 @@ for MCindex = 1:MCtimes
     end
 end
 %%
-for ss=1:SNR_num
+for ss=1:length(BW_range)
 AOAalign_comp_mean(ss) = sum((AOA_error_nocomp(:,ss)/pi*180)<(205/Nr),1)/MCtimes;
 AODalign_comp_mean(ss) = sum((AOD_error_nocomp(:,ss)/pi*180)<(205/Nt),1)/MCtimes;
 Align_comp_mean(ss) = sum(((AOD_error_nocomp(:,ss)/pi*180)<(205/Nt)&...
@@ -428,19 +501,19 @@ figure
 % plot(SNR_range,AOAalign_comp_mean,'--','linewidth',2);hold on
 % plot(SNR_range,AODalign_comp_mean,'--','linewidth',2);hold on
 
-semilogy(SNR_range,1-AOAalign_comp_mean,'-','linewidth',2);hold on
-semilogy(SNR_range,1-AODalign_comp_mean,'-','linewidth',2);hold on
-semilogy(SNR_range,1-Align_comp_mean,'-','linewidth',2);hold on
+semilogy(BW_range,1-AOAalign_comp_mean,'-','linewidth',2);hold on
+semilogy(BW_range,1-AODalign_comp_mean,'-','linewidth',2);hold on
+semilogy(BW_range,1-Align_comp_mean,'-','linewidth',2);hold on
 
 grid on
-xlabel('SNR (dB)')
+xlabel('Bandwidth [Hz]')
 ylabel('Misalignment Rate')
 legend('AoA','AoD','Alignment')
 %% RMSE evaluation
-portion = 0.9; % for debug 
-for ss=1:SNR_num
-    delay_error = abs(delay_est(ss,:)-tau_samp).^2;
-    RMSE_delay(ss) = sqrt(mean(get_portion(delay_error,portion)))*(Ts/(2*pi)/1e-9);
+portion = 0.8; % for debug 
+for ss=1:length(BW_range)
+%     delay_error = abs(delay_est(ss,:)-tau_samp(:,ss)).^2;
+%     RMSE_delay(ss) = sqrt(mean(get_portion(delay_error,portion)))*(Ts/(2*pi)/1e-9);
 %     RMSE_delay(ss) = sqrt(mean((delay_error)))*(Ts/(2*pi)/1e-9);
 
     
@@ -461,6 +534,7 @@ for ss=1:SNR_num
 
 
 end
+
 figure
 % subplot(211)
 % semilogy(SNR_range,RMSE_delay);hold on
@@ -471,15 +545,20 @@ figure
 
 
 % subplot(212)
-semilogy(SNR_range,RMSE_theta,'linewidth',2);hold on
-% semilogy(SNR_range,RMSE_phi,'linewidth',2);hold on
-semilogy(SNR_range,RMSE_theta_BM,'linewidth',2);hold on
-% semilogy(SNR_range,RMSE_phi_BM,'linewidth',2);hold on
+loglog(BW_range/1e6,RMSE_theta,'-o','linewidth',2);hold on
+% semilogy(BW_range,RMSE_phi,'linewidth',2);hold on
+loglog(BW_range/1e6,RMSE_theta_BM,'-o','linewidth',2);hold on
+
+loglog(linspace(10,2e3,1000),asind(sind(45)*(linspace(10,2e3,1000)*1e6/fc)),'--k','linewidth',2);hold on
+
+% semilogy(BW_range,RMSE_phi_BM,'linewidth',2);hold on
 grid on
-xlabel('Point-to-Point SNR [dB]')
+xlabel('Bandwidth [MHz]')
 ylabel('RMSE of AoA/AoD [deg]')
 title('angle est')
-legend('AoD','AoD (BM)')
+legend('AoD','AoD (BM)','AoD (Theo.)')
+xlim([2.5,4000])
+xticks([5,10,50,100,200,400,1000,2000])
 
 % legend('AoD','AoA','AoD (BM)','AoA (BM)')
 
@@ -501,10 +580,10 @@ for ss=1:length(SNR_range)
 end
 
 figure
-semilogy(SNR_range,RMSE_theta_nofine);hold on
-semilogy(SNR_range,RMSE_phi_nofine);hold on
+semilogy(BW_range,RMSE_theta_nofine);hold on
+semilogy(BW_range,RMSE_phi_nofine);hold on
 grid on
-xlabel('SNR [dB]')
+xlabel('Bandwidth [Hz]')
 ylabel('RMSE of AoA/AoD [deg]')
 title('angle est w/o refinement')
 
